@@ -6,4 +6,8 @@
 
 - [docs/operation-plan/README.md](docs/operation-plan/README.md)
 
+插件使用策略：
+
+- [docs/operation-plan/10-plugin-usage.md](docs/operation-plan/10-plugin-usage.md)
+
 后续开发按该目录中的阶段任务执行，每完成一个阶段必须实际运行验收并提交 Git。

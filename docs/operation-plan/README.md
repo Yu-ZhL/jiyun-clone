@@ -13,6 +13,7 @@
 - [07-jobs-security.md](07-jobs-security.md)：定时任务和安全要求。
 - [08-execution-phases.md](08-execution-phases.md)：分阶段执行任务和验收标准。
 - [09-launch-checklist.md](09-launch-checklist.md)：最低上线验收清单和开发硬性规则。
+- [10-plugin-usage.md](10-plugin-usage.md)：已安装插件的使用策略、页面特效建议和执行提醒。
 
 ## 执行原则
 
@@ -25,6 +26,7 @@
 - 所有后台关键操作必须写操作日志。
 - 所有服务器密码必须加密保存。
 - Docker 必须支持前端、后端、数据库和定时任务。
+- 涉及前端页面、视觉素材、部署、文档、报表时，先查阅 [10-plugin-usage.md](10-plugin-usage.md) 选择合适插件辅助。
 
 ## 下一步立即执行
 
