@@ -46,6 +46,37 @@ a {
   min-height: 100vh;
 }
 
+.toast {
+  position: fixed;
+  top: 18px;
+  right: 18px;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(460px, calc(100% - 36px));
+  padding: 12px 14px;
+  border: 1px solid rgba(29, 114, 243, 0.25);
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 18px 40px rgba(24, 43, 67, 0.16);
+  color: var(--text);
+}
+
+.toast button {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  background: #edf5ff;
+  color: var(--primary);
+}
+
+.muted {
+  color: var(--muted);
+}
+
 .container {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;
@@ -976,6 +1007,10 @@ th {
 
 .product-form {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.ticket-form {
+  grid-template-columns: 1fr 2fr auto;
 }
 
 .admin-form input,
