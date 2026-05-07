@@ -1,13 +1,29 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
 import { PrismaClient } from '@prisma/client';
-import { encryptPassword } from '../src/utils/crypto.js';
 
 const prisma = new PrismaClient();
 
 const cents = (value) => Math.round(value * 100);
 
 async function main() {
+  const legacyDemo = await prisma.user.findUnique({ where: { username: 'demo' } });
+  if (legacyDemo?.email === 'demo@example.hk') {
+    const legacyOrders = await prisma.order.findMany({ where: { userId: legacyDemo.id }, select: { id: true } });
+    const legacyOrderIds = legacyOrders.map((order) => order.id);
+    const legacyTickets = await prisma.ticket.findMany({ where: { userId: legacyDemo.id }, select: { id: true } });
+    const legacyTicketIds = legacyTickets.map((ticket) => ticket.id);
+    await prisma.ticketReply.deleteMany({ where: { ticketId: { in: legacyTicketIds } } });
+    await prisma.ticket.deleteMany({ where: { userId: legacyDemo.id } });
+    await prisma.notification.deleteMany({ where: { userId: legacyDemo.id } });
+    await prisma.walletTransaction.deleteMany({ where: { userId: legacyDemo.id } });
+    await prisma.renewal.deleteMany({ where: { orderId: { in: legacyOrderIds } } });
+    await prisma.server.deleteMany({ where: { userId: legacyDemo.id } });
+    await prisma.order.deleteMany({ where: { userId: legacyDemo.id } });
+    await prisma.impersonationToken.deleteMany({ where: { userId: legacyDemo.id } });
+    await prisma.user.delete({ where: { id: legacyDemo.id } });
+  }
+
   const adminPassword = process.env.ADMIN_DEFAULT_PASSWORD || '123456';
   await prisma.admin.upsert({
     where: { username: process.env.ADMIN_DEFAULT_USERNAME || 'admin' },
@@ -17,19 +33,6 @@ async function main() {
       passwordHash: await bcrypt.hash(adminPassword, 12),
       name: '系统管理员',
       role: 'super_admin'
-    }
-  });
-
-  const demoPasswordHash = await bcrypt.hash('123456', 12);
-  const demoUser = await prisma.user.upsert({
-    where: { username: 'demo' },
-    update: {},
-    create: {
-      username: 'demo',
-      email: 'demo@example.hk',
-      passwordHash: demoPasswordHash,
-      balance: cents(2000),
-      status: 'active'
     }
   });
 
@@ -89,47 +92,13 @@ async function main() {
     });
   }
 
-  const sampleOrder = await prisma.order.upsert({
-    where: { orderNo: 'JY202605070001' },
-    update: {},
-    create: {
-      orderNo: 'JY202605070001',
-      userId: demoUser.id,
-      productId: 'seed-1',
-      type: 'new_server',
-      cycle: 'monthly',
-      amount: cents(60),
-      payMethod: 'balance',
-      payStatus: 'paid',
-      provisionStatus: 'opened',
-      paidAt: new Date(),
-      openedAt: new Date()
-    }
-  });
-
-  await prisma.server.upsert({
-    where: { orderId: sampleOrder.id },
-    update: {},
-    create: {
-      userId: demoUser.id,
-      productId: 'seed-1',
-      orderId: sampleOrder.id,
-      name: 'HK-CN2-DEMO',
-      ip: '103.88.12.18',
-      os: 'Ubuntu 22.04',
-      loginUser: 'root',
-      loginPasswordEncrypted: encryptPassword('Demo@123456'),
-      status: 'running',
-      openedAt: new Date(),
-      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-    }
-  });
-
   const settings = {
     site_name: '极云主机管理系统',
     support_phone: '800-800-8000',
     support_email: 'support@example.com',
-    copyright: '版权信息:11111',
+    copyright: 'Copyright © 极云主机管理系统',
+    hero_title: '香港服务器',
+    hero_subtitle: 'T3+ 安全数据中心，BGP 国际多线与 CN2 线路，适合企业网站、电商和跨境业务。',
     registration_enabled: 'true',
     expiry_remind_days: process.env.EXPIRY_REMIND_DAYS || '7',
     overdue_suspend_days: process.env.OVERDUE_SUSPEND_DAYS || '3'

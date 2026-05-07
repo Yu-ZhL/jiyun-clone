@@ -28,7 +28,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -71,6 +72,66 @@ a {
   border-radius: 6px;
   background: #edf5ff;
   color: var(--primary);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 18, 32, 0.48);
+}
+
+.modal-panel {
+  width: min(520px, 100%);
+  padding: 22px;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.24);
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.modal-head h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.modal-form {
+  display: grid;
+  gap: 14px;
+}
+
+.modal-form label {
+  display: grid;
+  gap: 7px;
+  color: #455168;
+  font-weight: 700;
+}
+
+.modal-form input,
+.modal-form textarea {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: white;
+  color: var(--text);
+}
+
+.modal-form textarea {
+  min-height: 120px;
+  padding: 10px 12px;
+  resize: vertical;
 }
 
 .muted {
@@ -1015,6 +1076,7 @@ th {
 
 .admin-form input,
 .admin-form select,
+.admin-form textarea,
 .settings-grid input,
 .login-form-card input {
   width: 100%;
@@ -1024,6 +1086,13 @@ th {
   border-radius: 7px;
   background: white;
   color: var(--text);
+}
+
+.admin-form textarea {
+  grid-column: span 4;
+  min-height: 42px;
+  padding: 10px 12px;
+  resize: vertical;
 }
 
 .settings-grid label,

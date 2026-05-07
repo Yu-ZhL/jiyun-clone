@@ -14,10 +14,8 @@
 
 - 管理员：`admin`
 - 管理员密码：`123456`
-- 演示客户：`demo`
-- 演示客户密码：`123456`
 
-默认账号由 `backend/prisma/seed.js` 创建，密码以 bcrypt 哈希入库。
+默认管理员由 `backend/prisma/seed.js` 创建，密码以 bcrypt 哈希入库。客户账号通过前台注册接口创建。
 
 ## 环境初始化
 
@@ -55,7 +53,7 @@ prisma db push
 node prisma/seed.js
 ```
 
-这会同步表结构并创建默认管理员、演示客户、初始产品和系统配置。`worker` 等待 `backend` healthcheck 通过后启动，不单独执行建表。
+这会同步表结构并创建默认管理员、初始产品和系统配置。`worker` 等待 `backend` healthcheck 通过后启动，不单独执行建表。
 
 ## 本地开发
 
@@ -96,7 +94,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/acceptance.ps1
 - 首页和后台入口可访问。
 - `/api/health` 数据库检查通过。
 - 客户注册、登录态恢复。
-- 管理员 `admin/123456` 登录。
+- 管理员登录。
 - 后台新增产品后前台可见。
 - 客户创建订单、后台充值、余额支付并写流水。
 - 后台开通服务器，客户后台可见。

@@ -105,6 +105,42 @@ function addCycle(date, cycle) {
   return next;
 }
 
+async function completePaidOrder(tx, order) {
+  if (order.type === 'renew_server' && order.serverId) {
+    const server = await tx.server.findUnique({ where: { id: order.serverId } });
+    if (!server) throw new Error('续费服务器不存在');
+    const baseDate = server.expiresAt > new Date() ? server.expiresAt : new Date();
+    const newExpiresAt = addCycle(baseDate, order.cycle);
+    await tx.server.update({
+      where: { id: server.id },
+      data: { expiresAt: newExpiresAt, status: 'running', suspendedAt: null }
+    });
+    await tx.renewal.create({
+      data: {
+        serverId: server.id,
+        orderId: order.id,
+        oldExpiresAt: server.expiresAt,
+        newExpiresAt
+      }
+    });
+    await tx.notification.create({
+      data: {
+        userId: order.userId,
+        type: 'renewal_paid',
+        title: '服务器续费成功',
+        content: `${server.name} 已续费至 ${newExpiresAt.toISOString().slice(0, 10)}`
+      }
+    });
+    return { provisionStatus: 'opened' };
+  }
+
+  if (order.type === 'new_server') {
+    return { provisionStatus: 'pending' };
+  }
+
+  return {};
+}
+
 async function payOrderWithBalance(orderId, userId) {
   return prisma.$transaction(async (tx) => {
     const order = await tx.order.findFirst({ where: { id: orderId, userId }, include: { product: true, server: true } });
@@ -128,43 +164,16 @@ async function payOrderWithBalance(orderId, userId) {
       }
     });
 
-    const paidOrder = await tx.order.update({
+    const completion = await completePaidOrder(tx, order);
+    return tx.order.update({
       where: { id: order.id },
       data: {
         payMethod: 'balance',
         payStatus: 'paid',
-        provisionStatus: order.type === 'new_server' ? 'pending' : order.provisionStatus,
+        provisionStatus: completion.provisionStatus || order.provisionStatus,
         paidAt: new Date()
       }
     });
-
-    if (order.type === 'renew_server' && order.serverId) {
-      const server = await tx.server.findUnique({ where: { id: order.serverId } });
-      const baseDate = server.expiresAt > new Date() ? server.expiresAt : new Date();
-      const newExpiresAt = addCycle(baseDate, order.cycle);
-      await tx.server.update({
-        where: { id: server.id },
-        data: { expiresAt: newExpiresAt, status: 'running', suspendedAt: null }
-      });
-      await tx.renewal.create({
-        data: {
-          serverId: server.id,
-          orderId: order.id,
-          oldExpiresAt: server.expiresAt,
-          newExpiresAt
-        }
-      });
-      await tx.notification.create({
-        data: {
-          userId,
-          type: 'renewal_paid',
-          title: '服务器续费成功',
-          content: `${server.name} 已续费至 ${newExpiresAt.toISOString().slice(0, 10)}`
-        }
-      });
-    }
-
-    return paidOrder;
   });
 }
 
@@ -175,6 +184,35 @@ function serializeServer(server, includePassword = false) {
     ...rest,
     loginPassword: includePassword ? decryptPassword(server.loginPasswordEncrypted) : undefined
   };
+}
+
+function productPayload(body, partial = false) {
+  const data = {};
+  const stringFields = ['name', 'type', 'location', 'cpu', 'memory', 'disk', 'bandwidth', 'defense', 'status', 'description'];
+  for (const field of stringFields) {
+    if (body[field] !== undefined) data[field] = String(body[field]);
+  }
+  if (body.priceMonthly !== undefined) data.priceMonthly = cents(body.priceMonthly);
+  if (body.priceYearly !== undefined) data.priceYearly = cents(body.priceYearly);
+  if (body.stock !== undefined) data.stock = Number(body.stock || 0);
+  if (body.sortOrder !== undefined) data.sortOrder = Number(body.sortOrder || 0);
+
+  if (!partial) {
+    return {
+      type: '云服务器',
+      location: '中国香港',
+      cpu: '2 vCPU',
+      memory: '4 GB',
+      disk: '80 GB SSD',
+      bandwidth: '10M CN2',
+      defense: '20G 防护',
+      stock: 0,
+      status: 'on_sale',
+      description: '',
+      ...data
+    };
+  }
+  return data;
 }
 
 export function createApp() {
@@ -193,8 +231,17 @@ export function createApp() {
     ok(res, { service: 'backend', database: 'ok', timestamp: new Date().toISOString() });
   }));
 
+  app.get('/api/site-settings', asyncRoute(async (_req, res) => {
+    const rows = await prisma.systemSetting.findMany({
+      where: { key: { in: ['site_name', 'support_phone', 'support_email', 'copyright', 'hero_title', 'hero_subtitle'] } }
+    });
+    ok(res, Object.fromEntries(rows.map((row) => [row.key, row.value])));
+  }));
+
   app.post('/api/auth/register', asyncRoute(async (req, res) => {
     const { username, email, password, phone } = req.body;
+    const registrationSetting = await prisma.systemSetting.findUnique({ where: { key: 'registration_enabled' } });
+    if (registrationSetting?.value === 'false') return fail(res, 40003, '暂未开放注册');
     if (!username || !email || !password || password.length < 6) return fail(res, 40001, '用户名、邮箱和至少 6 位密码必填');
     const exists = await prisma.user.findFirst({ where: { OR: [{ username }, { email }] } });
     if (exists) return fail(res, 40002, '用户名或邮箱已存在');
@@ -360,7 +407,9 @@ export function createApp() {
   }));
 
   app.post('/api/client/notifications/:id/read', requireUser, asyncRoute(async (req, res) => {
-    ok(res, await prisma.notification.update({ where: { id: req.params.id }, data: { readAt: new Date() } }));
+    const notification = await prisma.notification.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    if (!notification) return fail(res, 40405, '通知不存在', 404);
+    ok(res, await prisma.notification.update({ where: { id: notification.id }, data: { readAt: new Date() } }));
   }));
 
   app.get('/api/client/tickets', requireUser, asyncRoute(async (req, res) => {
@@ -385,6 +434,7 @@ export function createApp() {
   app.post('/api/client/tickets/:id/replies', requireUser, asyncRoute(async (req, res) => {
     const ticket = await prisma.ticket.findFirst({ where: { id: req.params.id, userId: req.user.id } });
     if (!ticket) return fail(res, 40403, '工单不存在', 404);
+    if (!req.body.content) return fail(res, 40022, '回复内容必填');
     await prisma.ticket.update({ where: { id: ticket.id }, data: { status: 'open' } });
     ok(res, await prisma.ticketReply.create({ data: { ticketId: ticket.id, senderType: 'user', senderId: req.user.id, content: req.body.content } }));
   }));
@@ -411,28 +461,52 @@ export function createApp() {
     ok(res, await prisma.user.findMany({ orderBy: { createdAt: 'desc' } }));
   }));
 
+  app.get('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const user = await prisma.user.findUnique({
+      where: { id: req.params.id },
+      include: { orders: true, servers: true, walletLogs: true, tickets: true }
+    });
+    if (!user) return fail(res, 40404, '用户不存在', 404);
+    ok(res, user);
+  }));
+
+  app.put('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const data = {};
+    for (const key of ['email', 'phone', 'status']) {
+      if (req.body[key] !== undefined) data[key] = String(req.body[key]);
+    }
+    const user = await prisma.user.update({ where: { id: req.params.id }, data });
+    await logOperation(req, 'update_user', 'user', user.id, data);
+    ok(res, user);
+  }));
+
   app.post('/api/admin/users/:id/adjust-balance', requireAdmin, asyncRoute(async (req, res) => {
     const amount = cents(req.body.amount);
     const remark = req.body.remark || '后台手动充值';
-    const result = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.findUnique({ where: { id: req.params.id } });
-      if (!user) throw new Error('用户不存在');
-      const balanceAfter = user.balance + amount;
-      await tx.user.update({ where: { id: user.id }, data: { balance: balanceAfter } });
-      return tx.walletTransaction.create({
-        data: {
-          userId: user.id,
-          type: amount >= 0 ? 'recharge' : 'adjustment',
-          amount,
-          balanceBefore: user.balance,
-          balanceAfter,
-          adminId: req.admin.id,
-          remark
-        }
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const user = await tx.user.findUnique({ where: { id: req.params.id } });
+        if (!user) throw new Error('用户不存在');
+        const balanceAfter = user.balance + amount;
+        if (balanceAfter < 0) throw new Error('余额不能调整为负数');
+        await tx.user.update({ where: { id: user.id }, data: { balance: balanceAfter } });
+        return tx.walletTransaction.create({
+          data: {
+            userId: user.id,
+            type: amount >= 0 ? 'recharge' : 'adjustment',
+            amount,
+            balanceBefore: user.balance,
+            balanceAfter,
+            adminId: req.admin.id,
+            remark
+          }
+        });
       });
-    });
-    await logOperation(req, 'adjust_balance', 'user', req.params.id, { amount, remark });
-    ok(res, result);
+      await logOperation(req, 'adjust_balance', 'user', req.params.id, { amount, remark });
+      ok(res, result);
+    } catch (error) {
+      fail(res, 40051, error.message);
+    }
   }));
 
   app.post('/api/admin/users/:id/disable', requireAdmin, asyncRoute(async (req, res) => {
@@ -468,30 +542,23 @@ export function createApp() {
   }));
 
   app.post('/api/admin/products', requireAdmin, asyncRoute(async (req, res) => {
-    const data = {
-      name: req.body.name,
-      type: req.body.type || '云服务器',
-      location: req.body.location || '中国香港',
-      cpu: req.body.cpu || '2 vCPU',
-      memory: req.body.memory || '4 GB',
-      disk: req.body.disk || '80 GB SSD',
-      bandwidth: req.body.bandwidth || '10M CN2',
-      defense: req.body.defense || '20G 防护',
-      priceMonthly: cents(req.body.priceMonthly),
-      priceYearly: cents(req.body.priceYearly),
-      stock: Number(req.body.stock || 0),
-      status: req.body.status || 'on_sale',
-      description: req.body.description || ''
-    };
+    const data = productPayload(req.body);
     if (!data.name || !data.priceMonthly || !data.priceYearly) return fail(res, 40031, '产品名称和价格必填');
     const product = await prisma.product.create({ data });
     await logOperation(req, 'create_product', 'product', product.id, data);
     ok(res, product);
   }));
 
+  app.get('/api/admin/products/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const product = await prisma.product.findUnique({ where: { id: req.params.id } });
+    if (!product) return fail(res, 40401, '产品不存在', 404);
+    ok(res, product);
+  }));
+
   app.put('/api/admin/products/:id', requireAdmin, asyncRoute(async (req, res) => {
-    const product = await prisma.product.update({ where: { id: req.params.id }, data: req.body });
-    await logOperation(req, 'update_product', 'product', product.id);
+    const data = productPayload(req.body, true);
+    const product = await prisma.product.update({ where: { id: req.params.id }, data });
+    await logOperation(req, 'update_product', 'product', product.id, data);
     ok(res, product);
   }));
 
@@ -507,17 +574,46 @@ export function createApp() {
     ok(res, product);
   }));
 
+  app.delete('/api/admin/products/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const used = await prisma.order.count({ where: { productId: req.params.id } });
+    if (used > 0) return fail(res, 40032, '已有订单的产品不能删除，请改为下架');
+    const product = await prisma.product.delete({ where: { id: req.params.id } });
+    await logOperation(req, 'delete_product', 'product', product.id);
+    ok(res, product);
+  }));
+
   app.get('/api/admin/orders', requireAdmin, asyncRoute(async (_req, res) => {
     ok(res, await prisma.order.findMany({ include: { user: true, product: true, server: true }, orderBy: { createdAt: 'desc' } }));
   }));
 
-  app.post('/api/admin/orders/:id/mark-paid', requireAdmin, asyncRoute(async (req, res) => {
-    const order = await prisma.order.update({
-      where: { id: req.params.id },
-      data: { payStatus: 'paid', payMethod: 'manual', paidAt: new Date(), provisionStatus: 'pending' }
-    });
-    await logOperation(req, 'mark_order_paid', 'order', order.id);
+  app.get('/api/admin/orders/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { user: true, product: true, server: true, walletLogs: true, renewals: true } });
+    if (!order) return fail(res, 40406, '订单不存在', 404);
     ok(res, order);
+  }));
+
+  app.post('/api/admin/orders/:id/mark-paid', requireAdmin, asyncRoute(async (req, res) => {
+    try {
+      const order = await prisma.$transaction(async (tx) => {
+        const existing = await tx.order.findUnique({ where: { id: req.params.id } });
+        if (!existing) throw new Error('订单不存在');
+        if (existing.payStatus !== 'unpaid') throw new Error('订单不是未支付状态');
+        const completion = await completePaidOrder(tx, existing);
+        return tx.order.update({
+          where: { id: existing.id },
+          data: {
+            payStatus: 'paid',
+            payMethod: 'manual',
+            paidAt: new Date(),
+            provisionStatus: completion.provisionStatus || existing.provisionStatus
+          }
+        });
+      });
+      await logOperation(req, 'mark_order_paid', 'order', order.id);
+      ok(res, order);
+    } catch (error) {
+      fail(res, 40052, error.message);
+    }
   }));
 
   app.post('/api/admin/orders/:id/cancel', requireAdmin, asyncRoute(async (req, res) => {
@@ -526,9 +622,44 @@ export function createApp() {
     ok(res, order);
   }));
 
+  app.post('/api/admin/orders/:id/refund', requireAdmin, asyncRoute(async (req, res) => {
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const order = await tx.order.findUnique({ where: { id: req.params.id }, include: { user: true } });
+        if (!order) throw new Error('订单不存在');
+        if (order.payStatus !== 'paid') throw new Error('只有已支付订单可以退款');
+        const balanceAfter = order.user.balance + order.amount;
+        await tx.user.update({ where: { id: order.userId }, data: { balance: balanceAfter } });
+        await tx.walletTransaction.create({
+          data: {
+            userId: order.userId,
+            type: 'refund',
+            amount: order.amount,
+            balanceBefore: order.user.balance,
+            balanceAfter,
+            relatedOrderId: order.id,
+            adminId: req.admin.id,
+            remark: req.body.remark || `订单 ${order.orderNo} 后台退款`
+          }
+        });
+        return tx.order.update({ where: { id: order.id }, data: { payStatus: 'refunded' } });
+      });
+      await logOperation(req, 'refund_order', 'order', result.id, req.body);
+      ok(res, result);
+    } catch (error) {
+      fail(res, 40053, error.message);
+    }
+  }));
+
   app.get('/api/admin/servers', requireAdmin, asyncRoute(async (_req, res) => {
     const servers = await prisma.server.findMany({ include: { user: true, product: true, order: true }, orderBy: { createdAt: 'desc' } });
     ok(res, servers.map((server) => serializeServer(server, false)));
+  }));
+
+  app.get('/api/admin/servers/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const server = await prisma.server.findUnique({ where: { id: req.params.id }, include: { user: true, product: true, order: true, renewals: true } });
+    if (!server) return fail(res, 40402, '服务器不存在', 404);
+    ok(res, serializeServer(server, false));
   }));
 
   app.post('/api/admin/servers', requireAdmin, asyncRoute(async (req, res) => {
@@ -565,6 +696,24 @@ export function createApp() {
     ok(res, serializeServer(server, false));
   }));
 
+  app.put('/api/admin/servers/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const data = {};
+    for (const key of ['name', 'ip', 'os', 'loginUser', 'panelUrl', 'status']) {
+      if (req.body[key] !== undefined) data[key] = String(req.body[key]);
+    }
+    if (req.body.loginPassword) data.loginPasswordEncrypted = encryptPassword(req.body.loginPassword);
+    if (req.body.expiresAt) data.expiresAt = new Date(req.body.expiresAt);
+    const server = await prisma.server.update({ where: { id: req.params.id }, data });
+    await logOperation(req, 'update_server', 'server', server.id, { ...data, loginPasswordEncrypted: data.loginPasswordEncrypted ? '[encrypted]' : undefined });
+    ok(res, serializeServer(server, false));
+  }));
+
+  app.post('/api/admin/servers/:id/open', requireAdmin, asyncRoute(async (req, res) => {
+    const server = await prisma.server.update({ where: { id: req.params.id }, data: { status: 'running', openedAt: new Date(), suspendedAt: null } });
+    await logOperation(req, 'open_server_status', 'server', server.id);
+    ok(res, serializeServer(server, false));
+  }));
+
   app.post('/api/admin/servers/:id/suspend', requireAdmin, asyncRoute(async (req, res) => {
     const server = await prisma.server.update({ where: { id: req.params.id }, data: { status: 'suspended', suspendedAt: new Date() } });
     await logOperation(req, 'suspend_server', 'server', server.id);
@@ -577,15 +726,46 @@ export function createApp() {
     ok(res, server);
   }));
 
+  app.post('/api/admin/servers/:id/extend', requireAdmin, asyncRoute(async (req, res) => {
+    const server = await prisma.server.findUnique({ where: { id: req.params.id } });
+    if (!server) return fail(res, 40402, '服务器不存在', 404);
+    const expiresAt = req.body.expiresAt ? new Date(req.body.expiresAt) : addCycle(server.expiresAt > new Date() ? server.expiresAt : new Date(), req.body.cycle);
+    if (Number.isNaN(expiresAt.getTime())) return fail(res, 40042, '到期时间无效');
+    const updated = await prisma.server.update({ where: { id: server.id }, data: { expiresAt, status: 'running', suspendedAt: null } });
+    await logOperation(req, 'extend_server', 'server', server.id, { expiresAt });
+    ok(res, serializeServer(updated, false));
+  }));
+
+  app.post('/api/admin/servers/:id/delete', requireAdmin, asyncRoute(async (req, res) => {
+    const server = await prisma.server.update({ where: { id: req.params.id }, data: { deletedAt: new Date(), status: 'deleted' } });
+    await logOperation(req, 'delete_server', 'server', server.id);
+    ok(res, serializeServer(server, false));
+  }));
+
   app.get('/api/admin/tickets', requireAdmin, asyncRoute(async (_req, res) => {
     ok(res, await prisma.ticket.findMany({ include: { user: true, replies: true }, orderBy: { updatedAt: 'desc' } }));
   }));
 
+  app.get('/api/admin/tickets/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const ticket = await prisma.ticket.findUnique({ where: { id: req.params.id }, include: { user: true, replies: true } });
+    if (!ticket) return fail(res, 40403, '工单不存在', 404);
+    ok(res, ticket);
+  }));
+
   app.post('/api/admin/tickets/:id/replies', requireAdmin, asyncRoute(async (req, res) => {
+    const ticket = await prisma.ticket.findUnique({ where: { id: req.params.id } });
+    if (!ticket) return fail(res, 40403, '工单不存在', 404);
+    if (!req.body.content) return fail(res, 40022, '回复内容必填');
     const reply = await prisma.ticketReply.create({ data: { ticketId: req.params.id, senderType: 'admin', senderId: req.admin.id, content: req.body.content } });
     await prisma.ticket.update({ where: { id: req.params.id }, data: { status: 'replied' } });
     await logOperation(req, 'reply_ticket', 'ticket', req.params.id);
     ok(res, reply);
+  }));
+
+  app.post('/api/admin/tickets/:id/close', requireAdmin, asyncRoute(async (req, res) => {
+    const ticket = await prisma.ticket.update({ where: { id: req.params.id }, data: { status: 'closed', closedAt: new Date() } });
+    await logOperation(req, 'close_ticket', 'ticket', ticket.id);
+    ok(res, ticket);
   }));
 
   app.get('/api/admin/settings', requireAdmin, asyncRoute(async (_req, res) => {
@@ -605,8 +785,10 @@ export function createApp() {
     ok(res, await prisma.operationLog.findMany({ include: { admin: true }, orderBy: { createdAt: 'desc' }, take: 200 }));
   }));
 
-  app.post('/api/admin/jobs/run', requireAdmin, asyncRoute(async (_req, res) => {
-    ok(res, await runAllJobs(prisma));
+  app.post('/api/admin/jobs/run', requireAdmin, asyncRoute(async (req, res) => {
+    const result = await runAllJobs(prisma);
+    await logOperation(req, 'run_jobs', 'system_jobs', null, result);
+    ok(res, result);
   }));
 
   app.use('/api', (_req, res) => fail(res, 40400, 'API endpoint not found', 404));

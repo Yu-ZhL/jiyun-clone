@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   Bell,
@@ -49,6 +49,30 @@ const hk = {
   cartTitle: '確認訂單'
 };
 
+const defaultSiteSettings = {
+  site_name: '極雲主機管理系統',
+  support_phone: '800-800-8000',
+  support_email: 'support@example.com',
+  copyright: 'Copyright © 極雲主機管理系統',
+  hero_title: hk.heroTitle,
+  hero_subtitle: hk.heroSub
+};
+
+const emptyProductForm = {
+  name: '',
+  type: '云服务器',
+  location: '中国香港',
+  cpu: '',
+  memory: '',
+  disk: '',
+  bandwidth: '',
+  defense: '',
+  priceMonthly: '',
+  priceYearly: '',
+  stock: '',
+  description: ''
+};
+
 async function api(path, options = {}) {
   const response = await fetch(path, {
     credentials: 'include',
@@ -80,6 +104,7 @@ function App() {
   const [route, setRoute] = useState(getRoute);
   const [mobileNav, setMobileNav] = useState(false);
   const [products, setProducts] = useState([]);
+  const [siteSettings, setSiteSettings] = useState(defaultSiteSettings);
   const [user, setUser] = useState(null);
   const [admin, setAdmin] = useState(null);
   const [notice, setNotice] = useState('');
@@ -95,6 +120,7 @@ function App() {
   };
 
   const refreshProducts = async () => setProducts(await api('/api/products'));
+  const refreshSiteSettings = async () => setSiteSettings({ ...defaultSiteSettings, ...(await api('/api/site-settings')) });
   const refreshUser = async () => {
     try {
       setUser(await api('/api/auth/me'));
@@ -121,6 +147,7 @@ function App() {
   }, []);
 
   useEffect(() => {
+    refreshSiteSettings().catch((error) => setNotice(error.message));
     refreshProducts().catch((error) => setNotice(error.message));
     refreshUser();
     refreshAdmin();
@@ -148,12 +175,14 @@ function App() {
     products,
     refreshAdmin,
     refreshProducts,
+    refreshSiteSettings,
     refreshUser,
     route,
     routePath,
     setAdmin,
     setNotice,
     setUser,
+    siteSettings,
     user
   };
 
@@ -165,12 +194,12 @@ function App() {
       {routePath === '/buy' && <BuyPage {...shared} />}
       {routePath.startsWith('/client') && <ClientPortal {...shared} />}
       {isAdmin && <AdminPortal {...shared} />}
-      {!isAdmin && <PublicFooter />}
+      {!isAdmin && <PublicFooter siteSettings={siteSettings} />}
     </div>
   );
 }
 
-function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav }) {
+function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, siteSettings }) {
   const nav = [
     { label: hk.navHome, path: '/' },
     { label: hk.navProducts, path: '/buy' },
@@ -181,8 +210,8 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav }) {
     <header className="site-header">
       <div className="topbar">
         <div className="container topbar-inner">
-          <span>800-800-8000</span>
-          <span>support@example.com</span>
+          <span>{siteSettings.support_phone}</span>
+          <span>{siteSettings.support_email}</span>
           <button onClick={() => navigate('/client')}>控制台</button>
           <button onClick={() => navigate('/client')}>提交工單</button>
         </div>
@@ -190,7 +219,7 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav }) {
       <div className="container nav-row">
         <button className="brand" onClick={() => navigate('/')}>
           <span className="brand-mark"><Cloud size={24} /></span>
-          <span><strong>極雲</strong><small>主機管理系統</small></span>
+          <span><strong>{siteSettings.site_name.replace('主机管理系统', '').replace('主機管理系統', '') || '極雲'}</strong><small>主機管理系統</small></span>
         </button>
         <nav className={mobileNav ? 'nav-links open' : 'nav-links'}>
           {nav.map((item) => (
@@ -212,7 +241,7 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav }) {
   );
 }
 
-function HomePage({ products, navigate }) {
+function HomePage({ products, navigate, siteSettings }) {
   const cards = [
     { icon: <Zap />, title: '領先的產品技術', text: '提供中小企業及個人用戶友好的雲伺服器、高防及託管服務。' },
     { icon: <ShieldCheck />, title: '安全防護', text: '基於智能清洗策略，為核心業務提供穩定可靠的防護能力。' },
@@ -225,8 +254,8 @@ function HomePage({ products, navigate }) {
         <div className="container hero-content">
           <div className="hero-copy">
             <span className="eyebrow">Hong Kong IDC Service</span>
-            <h1>{hk.heroTitle}</h1>
-            <p>{hk.heroSub}</p>
+            <h1>{siteSettings.hero_title}</h1>
+            <p>{siteSettings.hero_subtitle}</p>
             <div className="hero-actions">
               <button className="primary" onClick={() => navigate('/buy')}>{hk.primaryCta}</button>
               <button className="secondary" onClick={() => navigate('/client')}>{hk.secondaryCta}</button>
@@ -398,16 +427,16 @@ function AuthPage({ refreshUser, setNotice }) {
   return (
     <main className="login-page client-login">
       <div className="login-visual"><div className="login-illustration"><Cloud size={72} /><h1>客户控制台</h1><p>真实账号登录后通过服务端 Cookie 保持会话</p></div></div>
-      <form className="login-form-card" onSubmit={submit}>
+      <form className="login-form-card" onSubmit={submit} autoComplete="off">
         <h2>{mode === 'login' ? '客户登录' : '客户注册'}</h2>
         <p>登录、注册和会话保持均由后端接口处理</p>
         {mode === 'register' ? (
           <>
-            <label>用户名<input value={form.username} onChange={(event) => update('username', event.target.value)} required /></label>
-            <label>邮箱<input value={form.email} onChange={(event) => update('email', event.target.value)} required /></label>
+            <label>用户名<input autoComplete="off" value={form.username} onChange={(event) => update('username', event.target.value)} required /></label>
+            <label>邮箱<input autoComplete="off" value={form.email} onChange={(event) => update('email', event.target.value)} required /></label>
           </>
-        ) : <label>账号<input value={form.account} onChange={(event) => update('account', event.target.value)} required /></label>}
-        <label>密码<input type="password" value={form.password} onChange={(event) => update('password', event.target.value)} required /></label>
+        ) : <label>账号<input autoComplete="off" value={form.account} onChange={(event) => update('account', event.target.value)} required /></label>}
+        <label>密码<input autoComplete="new-password" type="password" value={form.password} onChange={(event) => update('password', event.target.value)} required /></label>
         <button className="primary wide" type="submit">{mode === 'login' ? '登 录' : '注 册'}</button>
         <div className="login-foot"><span>{mode === 'login' ? '没有账号？' : '已有账号？'}</span><button type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>{mode === 'login' ? '注册' : '登录'}</button></div>
       </form>
@@ -416,8 +445,17 @@ function AuthPage({ refreshUser, setNotice }) {
 }
 
 function ClientDashboard({ user, navigate, setNotice, refreshUser }) {
+  const [section, setSection] = useState('overview');
   const [data, setData] = useState({ summary: null, orders: [], servers: [], wallet: [], tickets: [], notifications: [] });
   const [ticket, setTicket] = useState({ title: '', content: '' });
+  const clientMenu = [
+    ['overview', LayoutDashboard, '总览'],
+    ['servers', Server, '我的服务器'],
+    ['orders', ReceiptText, '订单记录'],
+    ['tickets', Ticket, '工单支持'],
+    ['wallet', CreditCard, '财务中心'],
+    ['notifications', Bell, '站内通知']
+  ];
 
   const load = async () => {
     const [summary, orders, servers, wallet, tickets, notifications] = await Promise.all([
@@ -475,34 +513,35 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser }) {
     <main className="client-shell">
       <aside className="client-sidebar">
         <div className="client-profile"><div className="avatar">{user.username.slice(0, 1).toUpperCase()}</div><strong>{user.username}</strong><span>{user.email}</span><span>余额 {formatMoney(user.balance)}</span></div>
-        {[[LayoutDashboard, '總覽'], [Server, '我的伺服器'], [ReceiptText, '訂單記錄'], [Ticket, '工單支援'], [CreditCard, '財務中心']].map(([Icon, label]) => <button key={label} className={label === '總覽' ? 'active' : ''}><Icon size={18} />{label}</button>)}
+        {clientMenu.map(([key, Icon, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}><Icon size={18} />{label}</button>)}
         <button onClick={logout}>退出登录</button>
       </aside>
       <section className="client-content">
         <div className="dashboard-head"><div><span className="eyebrow">Client Console</span><h1>{hk.consoleTitle}</h1></div><button className="primary" onClick={() => navigate('/buy')}><Plus size={18} />購買伺服器</button></div>
-        <div className="metric-grid">
-          <Metric icon={<Server />} label="伺服器" value={data.summary?.servers || 0} />
-          <Metric icon={<ReceiptText />} label="訂單" value={data.summary?.orders || 0} />
-          <Metric icon={<CreditCard />} label="餘額" value={formatMoney(user.balance)} />
-          <Metric icon={<Bell />} label="未读通知" value={data.summary?.unreadNotifications || 0} />
-        </div>
-        <Panel title="我的服务器">
-          <DataTable columns={['名称', 'IP', '系统', '登录', '到期时间', '状态', '操作']} rows={data.servers.map((server) => [server.name, server.ip, server.os, `${server.loginUser} / ${server.loginPassword}`, formatDate(server.expiresAt), server.status, <button className="table-action" onClick={() => renew(server.id)}>续费</button>])} />
-        </Panel>
-        <div className="two-col">
-          <Panel title="订单记录"><Rows rows={data.orders.slice(0, 8).map((order) => ({ left: order.orderNo, mid: formatMoney(order.amount), right: order.payStatus, action: order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : null }))} /></Panel>
-          <Panel title="站内通知"><Rows rows={data.notifications.slice(0, 8).map((item) => ({ left: item.title, mid: formatDate(item.createdAt), right: item.readAt ? '已读' : '未读' }))} /></Panel>
-        </div>
-        <div className="two-col">
-          <Panel title="提交工单">
-            <form className="admin-form ticket-form" onSubmit={submitTicket}>
-              <input placeholder="标题" value={ticket.title} onChange={(event) => setTicket((prev) => ({ ...prev, title: event.target.value }))} required />
-              <input placeholder="内容" value={ticket.content} onChange={(event) => setTicket((prev) => ({ ...prev, content: event.target.value }))} required />
-              <button className="primary" type="submit">提交</button>
-            </form>
-          </Panel>
-          <Panel title="余额流水"><Rows rows={data.wallet.slice(0, 8).map((item) => ({ left: item.type, mid: formatMoney(item.amount), right: formatMoney(item.balanceAfter) }))} /></Panel>
-        </div>
+        {section === 'overview' && (
+          <>
+            <div className="metric-grid">
+              <Metric icon={<Server />} label="服务器" value={data.summary?.servers || 0} />
+              <Metric icon={<ReceiptText />} label="订单" value={data.summary?.orders || 0} />
+              <Metric icon={<CreditCard />} label="余额" value={formatMoney(user.balance)} />
+              <Metric icon={<Bell />} label="未读通知" value={data.summary?.unreadNotifications || 0} />
+            </div>
+            <div className="two-col">
+              <Panel title="最近订单"><Rows rows={data.orders.slice(0, 6).map((order) => ({ left: order.orderNo, mid: formatMoney(order.amount), right: order.payStatus, action: order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : null }))} /></Panel>
+              <Panel title="最近通知"><Rows rows={data.notifications.slice(0, 6).map((item) => ({ left: item.title, mid: formatDate(item.createdAt), right: item.readAt ? '已读' : '未读' }))} /></Panel>
+            </div>
+          </>
+        )}
+        {section === 'servers' && <Panel title="我的服务器"><DataTable columns={['名称', 'IP', '系统', '登录', '到期时间', '状态', '操作']} rows={data.servers.map((server) => [server.name, server.ip, server.os, `${server.loginUser} / ${server.loginPassword}`, formatDate(server.expiresAt), server.status, <button className="table-action" onClick={() => renew(server.id)}>续费</button>])} /></Panel>}
+        {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单号', '产品', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [order.orderNo, order.product?.name || '-', order.type, formatMoney(order.amount), order.payStatus, order.provisionStatus, order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : '-'])} /></Panel>}
+        {section === 'tickets' && (
+          <div className="two-col">
+            <Panel title="提交工单"><form className="admin-form ticket-form" onSubmit={submitTicket}><input placeholder="标题" value={ticket.title} onChange={(event) => setTicket((prev) => ({ ...prev, title: event.target.value }))} required /><input placeholder="内容" value={ticket.content} onChange={(event) => setTicket((prev) => ({ ...prev, content: event.target.value }))} required /><button className="primary" type="submit">提交</button></form></Panel>
+            <Panel title="工单列表"><Rows rows={data.tickets.map((item) => ({ left: item.title, mid: formatDate(item.updatedAt), right: item.status }))} /></Panel>
+          </div>
+        )}
+        {section === 'wallet' && <Panel title="余额流水"><Rows rows={data.wallet.map((item) => ({ left: item.remark || item.type, mid: formatMoney(item.amount), right: formatMoney(item.balanceAfter) }))} /></Panel>}
+        {section === 'notifications' && <Panel title="站内通知"><Rows rows={data.notifications.map((item) => ({ left: item.title, mid: item.content, right: item.readAt ? '已读' : '未读' }))} /></Panel>}
       </section>
     </main>
   );
@@ -527,21 +566,24 @@ function AdminLogin({ refreshAdmin, setNotice }) {
   return (
     <main className="login-page">
       <div className="login-visual"><div className="login-illustration"><Cloud size={72} /><h1>主机管理系统</h1><p>管理员账号由后端 seed 生成</p></div></div>
-      <form className="login-form-card" onSubmit={submit}>
+      <form className="login-form-card" onSubmit={submit} autoComplete="off">
         <h2>主机管理系统</h2><p>管理员中文后台，默认账号由 seed 创建</p>
-        <label>账户<input value={form.username} onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))} /></label>
-        <label>密码<input type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} /></label>
+        <label>账户<input autoComplete="off" value={form.username} onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))} /></label>
+        <label>密码<input autoComplete="new-password" type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} /></label>
         <button className="primary wide" type="submit">登 录</button>
       </form>
     </main>
   );
 }
 
-function AdminDashboard({ admin, navigate, refreshAdmin, setNotice }) {
+function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProducts, refreshSiteSettings }) {
   const [section, setSection] = useState('dashboard');
   const [data, setData] = useState({ summary: {}, users: [], products: [], orders: [], servers: [], tickets: [], logs: [], settings: [] });
-  const [productForm, setProductForm] = useState({ name: '', priceMonthly: 88, priceYearly: 880, stock: 10 });
+  const [productForm, setProductForm] = useState(emptyProductForm);
   const [serverForm, setServerForm] = useState({ orderId: '', name: '', ip: '', os: 'Ubuntu 22.04', loginUser: 'root', loginPassword: '', expiresAt: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) });
+  const [rechargeForm, setRechargeForm] = useState({ open: false, user: null, amount: '', remark: '' });
+  const [replyForm, setReplyForm] = useState({ open: false, ticket: null, content: '' });
+  const [settingsForm, setSettingsForm] = useState({});
 
   const load = async () => {
     const [summary, users, products, orders, servers, tickets, logs, settings] = await Promise.all([
@@ -558,6 +600,9 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice }) {
   };
 
   useEffect(() => { load().catch((error) => setNotice(error.message)); }, []);
+  useEffect(() => {
+    setSettingsForm(Object.fromEntries(data.settings.map((item) => [item.key, item.value])));
+  }, [data.settings]);
 
   const logout = async () => {
     await api('/api/admin/auth/logout', { method: 'POST' });
@@ -568,23 +613,58 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice }) {
     event.preventDefault();
     try {
       await api('/api/admin/products', { method: 'POST', body: productForm });
-      setProductForm({ name: '', priceMonthly: 88, priceYearly: 880, stock: 10 });
+      setProductForm(emptyProductForm);
+      await load();
+      await refreshProducts();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const updateProductStatus = async (product, status) => {
+    try {
+      await api(`/api/admin/products/${product.id}/${status === 'on_sale' ? 'on-sale' : 'off-sale'}`, { method: 'POST' });
+      await load();
+      await refreshProducts();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const saveSettings = async (event) => {
+    event.preventDefault();
+    try {
+      await api('/api/admin/settings', { method: 'PUT', body: settingsForm });
+      await load();
+      await refreshSiteSettings();
+      setNotice('系统配置已保存');
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const submitRecharge = async (event) => {
+    event.preventDefault();
+    if (!rechargeForm.user) return;
+    try {
+      await api(`/api/admin/users/${rechargeForm.user.id}/adjust-balance`, {
+        method: 'POST',
+        body: { amount: Number(rechargeForm.amount), remark: rechargeForm.remark || '后台手动充值' }
+      });
+      setRechargeForm({ open: false, user: null, amount: '', remark: '' });
       await load();
     } catch (error) {
       setNotice(error.message);
     }
   };
 
-  const recharge = async (userId) => {
-    const amount = Number(prompt('充值金额', '100'));
-    if (!amount) return;
-    await api(`/api/admin/users/${userId}/adjust-balance`, { method: 'POST', body: { amount, remark: '后台手动充值' } });
-    await load();
-  };
-
   const markPaid = async (orderId) => {
-    await api(`/api/admin/orders/${orderId}/mark-paid`, { method: 'POST' });
-    await load();
+    try {
+      await api(`/api/admin/orders/${orderId}/mark-paid`, { method: 'POST' });
+      await load();
+    } catch (error) {
+      setNotice(error.message);
+    }
   };
 
   const openServer = async (event) => {
@@ -609,6 +689,18 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice }) {
     await load();
   };
 
+  const submitReply = async (event) => {
+    event.preventDefault();
+    if (!replyForm.ticket) return;
+    try {
+      await api(`/api/admin/tickets/${replyForm.ticket.id}/replies`, { method: 'POST', body: { content: replyForm.content } });
+      setReplyForm({ open: false, ticket: null, content: '' });
+      await load();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
   const pendingPaidOrders = data.orders.filter((order) => order.payStatus === 'paid' && order.provisionStatus !== 'opened' && order.type === 'new_server');
 
   return (
@@ -628,12 +720,29 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice }) {
       <section className="admin-main">
         <div className="admin-top"><div className="admin-search"><Search size={17} />搜索菜单 / 订单 / 用户</div><button className="icon-btn"><Bell size={18} /></button><button className="admin-user" onClick={logout}><User size={17} />{admin.username}</button></div>
         {section === 'dashboard' && <AdminSummary summary={data.summary} runJobs={runJobs} />}
-        {section === 'products' && <AdminProducts products={data.products} form={productForm} setForm={setProductForm} addProduct={addProduct} />}
+        {section === 'products' && <AdminProducts products={data.products} form={productForm} setForm={setProductForm} addProduct={addProduct} updateProductStatus={updateProductStatus} />}
         {section === 'orders' && <AdminOrders orders={data.orders} markPaid={markPaid} />}
         {section === 'servers' && <AdminServers servers={data.servers} orders={pendingPaidOrders} form={serverForm} setForm={setServerForm} openServer={openServer} />}
-        {section === 'users' && <AdminUsers users={data.users} recharge={recharge} impersonate={impersonate} />}
-        {section === 'tickets' && <AdminTickets tickets={data.tickets} load={load} />}
-        {section === 'logs' && <AdminLogs logs={data.logs} settings={data.settings} />}
+        {section === 'users' && <AdminUsers users={data.users} openRecharge={(user) => setRechargeForm({ open: true, user, amount: '', remark: '后台手动充值' })} impersonate={impersonate} />}
+        {section === 'tickets' && <AdminTickets tickets={data.tickets} openReply={(ticket) => setReplyForm({ open: true, ticket, content: '' })} />}
+        {section === 'logs' && <AdminLogs logs={data.logs} settings={data.settings} settingsForm={settingsForm} setSettingsForm={setSettingsForm} saveSettings={saveSettings} />}
+        {rechargeForm.open && (
+          <Modal title={`给 ${rechargeForm.user.username} 充值`} onClose={() => setRechargeForm({ open: false, user: null, amount: '', remark: '' })}>
+            <form className="modal-form" onSubmit={submitRecharge}>
+              <label>充值金额<input type="number" min="0.01" step="0.01" value={rechargeForm.amount} onChange={(event) => setRechargeForm((prev) => ({ ...prev, amount: event.target.value }))} required /></label>
+              <label>备注<input value={rechargeForm.remark} onChange={(event) => setRechargeForm((prev) => ({ ...prev, remark: event.target.value }))} /></label>
+              <button className="primary" type="submit">确认充值</button>
+            </form>
+          </Modal>
+        )}
+        {replyForm.open && (
+          <Modal title={`回复工单：${replyForm.ticket.title}`} onClose={() => setReplyForm({ open: false, ticket: null, content: '' })}>
+            <form className="modal-form" onSubmit={submitReply}>
+              <label>回复内容<textarea value={replyForm.content} onChange={(event) => setReplyForm((prev) => ({ ...prev, content: event.target.value }))} required /></label>
+              <button className="primary" type="submit">发送回复</button>
+            </form>
+          </Modal>
+        )}
       </section>
     </main>
   );
@@ -654,20 +763,39 @@ function AdminSummary({ summary, runJobs }) {
   );
 }
 
-function AdminProducts({ products, form, setForm, addProduct }) {
+function AdminProducts({ products, form, setForm, addProduct, updateProductStatus }) {
+  const setField = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
   return (
     <div className="admin-page">
       <h1>产品管理</h1>
       <Panel title="新增购买方案">
         <form className="admin-form product-form" onSubmit={addProduct}>
-          <input placeholder="产品名称" value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} required />
-          <input placeholder="月付" type="number" value={form.priceMonthly} onChange={(event) => setForm((prev) => ({ ...prev, priceMonthly: Number(event.target.value) }))} />
-          <input placeholder="年付" type="number" value={form.priceYearly} onChange={(event) => setForm((prev) => ({ ...prev, priceYearly: Number(event.target.value) }))} />
-          <input placeholder="库存" type="number" value={form.stock} onChange={(event) => setForm((prev) => ({ ...prev, stock: Number(event.target.value) }))} />
+          <input placeholder="产品名称" value={form.name} onChange={(event) => setField('name', event.target.value)} required />
+          <input placeholder="类型" value={form.type} onChange={(event) => setField('type', event.target.value)} />
+          <input placeholder="地区" value={form.location} onChange={(event) => setField('location', event.target.value)} />
+          <input placeholder="CPU" value={form.cpu} onChange={(event) => setField('cpu', event.target.value)} />
+          <input placeholder="内存" value={form.memory} onChange={(event) => setField('memory', event.target.value)} />
+          <input placeholder="硬盘" value={form.disk} onChange={(event) => setField('disk', event.target.value)} />
+          <input placeholder="带宽" value={form.bandwidth} onChange={(event) => setField('bandwidth', event.target.value)} />
+          <input placeholder="防护" value={form.defense} onChange={(event) => setField('defense', event.target.value)} />
+          <input placeholder="月付" type="number" min="0.01" step="0.01" value={form.priceMonthly} onChange={(event) => setField('priceMonthly', event.target.value)} required />
+          <input placeholder="年付" type="number" min="0.01" step="0.01" value={form.priceYearly} onChange={(event) => setField('priceYearly', event.target.value)} required />
+          <input placeholder="库存" type="number" min="0" value={form.stock} onChange={(event) => setField('stock', event.target.value)} />
+          <textarea placeholder="产品说明" value={form.description} onChange={(event) => setField('description', event.target.value)} />
           <button className="primary" type="submit"><Plus size={17} />新增</button>
         </form>
       </Panel>
-      <DataTable columns={['产品名称', '类型', '地区', '月付', '年付', '库存', '状态']} rows={products.map((product) => [product.name, product.type, product.location, formatMoney(product.priceMonthly), formatMoney(product.priceYearly), product.stock, product.status])} />
+      <DataTable columns={['产品名称', '类型', '地区', '配置', '月付', '年付', '库存', '状态', '操作']} rows={products.map((product) => [
+        product.name,
+        product.type,
+        product.location,
+        `${product.cpu} / ${product.memory} / ${product.disk}`,
+        formatMoney(product.priceMonthly),
+        formatMoney(product.priceYearly),
+        product.stock,
+        product.status,
+        <button className="table-action" onClick={() => updateProductStatus(product, product.status === 'on_sale' ? 'off_sale' : 'on_sale')}>{product.status === 'on_sale' ? '下架' : '上架'}</button>
+      ])} />
     </div>
   );
 }
@@ -700,22 +828,41 @@ function AdminServers({ servers, orders, form, setForm, openServer }) {
   );
 }
 
-function AdminUsers({ users, recharge, impersonate }) {
-  return <div className="admin-page"><h1>用户管理</h1><DataTable columns={['用户', '邮箱', '余额', '状态', '注册时间', '操作']} rows={users.map((user) => [user.username, user.email, formatMoney(user.balance), user.status, formatDate(user.createdAt), <><button className="table-action" onClick={() => recharge(user.id)}>充值</button><button className="table-action" onClick={() => impersonate(user.id)}>代登录</button></>])} /></div>;
+function AdminUsers({ users, openRecharge, impersonate }) {
+  return <div className="admin-page"><h1>用户管理</h1><DataTable columns={['用户', '邮箱', '余额', '状态', '注册时间', '操作']} rows={users.map((user) => [user.username, user.email, formatMoney(user.balance), user.status, formatDate(user.createdAt), <><button className="table-action" onClick={() => openRecharge(user)}>充值</button><button className="table-action" onClick={() => impersonate(user.id)}>代登录</button></>])} /></div>;
 }
 
-function AdminTickets({ tickets, load }) {
-  const reply = async (ticketId) => {
-    const content = prompt('回复内容', '已收到，我们会尽快处理。');
-    if (!content) return;
-    await api(`/api/admin/tickets/${ticketId}/replies`, { method: 'POST', body: { content } });
-    await load();
+function AdminTickets({ tickets, openReply }) {
+  return <div className="admin-page"><h1>工单管理</h1><DataTable columns={['标题', '用户', '状态', '更新时间', '操作']} rows={tickets.map((ticket) => [ticket.title, ticket.user?.username, ticket.status, formatDate(ticket.updatedAt), <button className="table-action" onClick={() => openReply(ticket)}>回复</button>])} /></div>;
+}
+
+function AdminLogs({ logs, settings, settingsForm, setSettingsForm, saveSettings }) {
+  const settingLabel = {
+    site_name: '站点名称',
+    support_phone: '客服电话',
+    support_email: '客服邮箱',
+    copyright: '版权信息',
+    hero_title: '首页标题',
+    hero_subtitle: '首页副标题',
+    registration_enabled: '开放注册',
+    expiry_remind_days: '到期提醒天数',
+    overdue_suspend_days: '逾期暂停天数'
   };
-  return <div className="admin-page"><h1>工单管理</h1><DataTable columns={['标题', '用户', '状态', '更新时间', '操作']} rows={tickets.map((ticket) => [ticket.title, ticket.user?.username, ticket.status, formatDate(ticket.updatedAt), <button className="table-action" onClick={() => reply(ticket.id)}>回复</button>])} /></div>;
-}
-
-function AdminLogs({ logs, settings }) {
-  return <div className="admin-page"><h1>操作日志</h1><Panel title="系统配置"><Rows rows={settings.map((item) => ({ left: item.key, mid: item.value, right: formatDate(item.updatedAt) }))} /></Panel><DataTable columns={['动作', '目标', '管理员', '时间', '详情']} rows={logs.map((log) => [log.action, `${log.targetType}:${log.targetId || '-'}`, log.admin?.username || '-', formatDate(log.createdAt), log.detail || '-'])} /></div>;
+  const update = (key, value) => setSettingsForm((prev) => ({ ...prev, [key]: value }));
+  return (
+    <div className="admin-page">
+      <h1>操作日志</h1>
+      <Panel title="系统配置">
+        <form className="settings-grid" onSubmit={saveSettings}>
+          {settings.map((item) => (
+            <label key={item.key}>{settingLabel[item.key] || item.key}<input value={settingsForm[item.key] ?? item.value} onChange={(event) => update(item.key, event.target.value)} /></label>
+          ))}
+          <button className="primary" type="submit">保存配置</button>
+        </form>
+      </Panel>
+      <DataTable columns={['动作', '目标', '管理员', '时间', '详情']} rows={logs.map((log) => [log.action, `${log.targetType}:${log.targetId || '-'}`, log.admin?.username || '-', formatDate(log.createdAt), log.detail || '-'])} />
+    </div>
+  );
 }
 
 function Metric({ icon, label, value }) {
@@ -744,16 +891,27 @@ function Rows({ rows }) {
   return rows.map((row, index) => <div className="list-item" key={index}><span>{row.left}</span><strong>{row.mid}</strong><em>{row.right}</em>{row.action}</div>);
 }
 
-function PublicFooter() {
+function Modal({ title, children, onClose }) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-head"><h2>{title}</h2><button className="icon-btn" onClick={onClose} aria-label="关闭"><X size={18} /></button></div>
+        {children}
+      </section>
+    </div>
+  );
+}
+
+function PublicFooter({ siteSettings }) {
   return (
     <footer className="site-footer">
       <div className="container footer-grid">
-        <div><div className="footer-brand"><Cloud size={26} />極雲主機管理系統</div><p>專業互聯網基礎服務提供商，香港伺服器、美國伺服器及 VPS 服務商。</p></div>
+        <div><div className="footer-brand"><Cloud size={26} />{siteSettings.site_name}</div><p>專業互聯網基礎服務提供商，香港伺服器、美國伺服器及 VPS 服務商。</p></div>
         <div><h3>產品中心</h3><a>雲伺服器</a><a>伺服器租用</a><a>伺服器託管</a></div>
         <div><h3>服務支援</h3><a>服務條款</a><a>私隱政策</a><a>提交工單</a></div>
-        <div><h3>聯絡我們</h3><p>中國·香港</p><p>800-800-8000</p><p>support@example.com</p></div>
+        <div><h3>聯絡我們</h3><p>中國·香港</p><p>{siteSettings.support_phone}</p><p>{siteSettings.support_email}</p></div>
       </div>
-      <div className="copyright">10000+ 個客戶共同選擇了主機管理系統 · 版權信息:11111</div>
+      <div className="copyright">{siteSettings.copyright}</div>
     </footer>
   );
 }

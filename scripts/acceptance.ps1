@@ -38,6 +38,11 @@ if ($health.database -ne 'ok') {
   throw 'health database not ok'
 }
 
+$siteSettings = Call-Api GET '/api/site-settings' $null (New-Object Microsoft.PowerShell.Commands.WebRequestSession)
+if (-not $siteSettings.site_name -or -not $siteSettings.support_email) {
+  throw 'public site settings missing'
+}
+
 $userSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $adminSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $suffix = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
@@ -91,6 +96,15 @@ $renewOrder = Call-Api POST "/api/client/servers/$($server.id)/renew" @{ cycle =
 $renewPaid = Call-Api POST "/api/orders/$($renewOrder.id)/pay-with-balance" $null $userSession
 if ($renewPaid.payStatus -ne 'paid') { throw 'renewal payment failed' }
 
+$serverBeforeManualRenew = (Call-Api GET '/api/client/servers' $null $userSession | Where-Object { $_.id -eq $server.id } | Select-Object -First 1)
+$manualRenewOrder = Call-Api POST "/api/client/servers/$($server.id)/renew" @{ cycle = 'monthly' } $userSession
+$manualRenewPaid = Call-Api POST "/api/admin/orders/$($manualRenewOrder.id)/mark-paid" $null $adminSession
+if ($manualRenewPaid.payStatus -ne 'paid') { throw 'manual renewal mark paid failed' }
+$serverAfterManualRenew = (Call-Api GET '/api/client/servers' $null $userSession | Where-Object { $_.id -eq $server.id } | Select-Object -First 1)
+if ([DateTime]$serverAfterManualRenew.expiresAt -le [DateTime]$serverBeforeManualRenew.expiresAt) {
+  throw 'manual renewal did not extend server expiry'
+}
+
 $ticket = Call-Api POST '/api/client/tickets' @{ title = "Acceptance ticket $suffix"; content = 'Please check server.' } $userSession
 Call-Api POST "/api/admin/tickets/$($ticket.id)/replies" @{ content = 'Acceptance reply.' } $adminSession | Out-Null
 
@@ -129,7 +143,9 @@ if ($dbServer -match 'Secret!234') { throw 'plain server password stored' }
   orderNo = $order.orderNo
   serverId = $server.id
   renewalOrder = $renewOrder.orderNo
+  manualRenewalOrder = $manualRenewOrder.orderNo
   ticketId = $ticket.id
+  siteName = $siteSettings.site_name
   impersonationOneTime = $tokenReuseFailed
   walletTransactions = @($wallet).Count
   operationLogs = @($logs).Count
