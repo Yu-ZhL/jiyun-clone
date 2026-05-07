@@ -446,15 +446,52 @@ export function createApp() {
   }));
 
   app.get('/api/admin/dashboard/summary', requireAdmin, asyncRoute(async (_req, res) => {
-    const [users, products, orders, servers, tickets, income] = await Promise.all([
+    const since = new Date();
+    since.setDate(since.getDate() - 6);
+    since.setHours(0, 0, 0, 0);
+    const [users, products, orders, servers, tickets, income, unpaidOrders, paidPendingOrders, expiringServers, openTickets, recentOrders] = await Promise.all([
       prisma.user.count(),
       prisma.product.count(),
       prisma.order.count(),
       prisma.server.count({ where: { deletedAt: null } }),
       prisma.ticket.count(),
-      prisma.order.aggregate({ where: { payStatus: 'paid' }, _sum: { amount: true } })
+      prisma.order.aggregate({ where: { payStatus: 'paid' }, _sum: { amount: true } }),
+      prisma.order.count({ where: { payStatus: 'unpaid' } }),
+      prisma.order.count({ where: { payStatus: 'paid', provisionStatus: 'pending', type: 'new_server' } }),
+      prisma.server.count({ where: { status: 'expiring', deletedAt: null } }),
+      prisma.ticket.count({ where: { status: { in: ['open', 'replied'] } } }),
+      prisma.order.findMany({
+        where: { createdAt: { gte: since } },
+        select: { amount: true, payStatus: true, createdAt: true },
+        orderBy: { createdAt: 'asc' }
+      })
     ]);
-    ok(res, { users, products, orders, servers, tickets, income: income._sum.amount || 0 });
+    const daily = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(since);
+      date.setDate(since.getDate() + index);
+      return { date: date.toISOString().slice(0, 10), orders: 0, income: 0 };
+    });
+    for (const order of recentOrders) {
+      const key = order.createdAt.toISOString().slice(0, 10);
+      const day = daily.find((item) => item.date === key);
+      if (day) {
+        day.orders += 1;
+        if (order.payStatus === 'paid') day.income += order.amount;
+      }
+    }
+    ok(res, {
+      users,
+      products,
+      orders,
+      servers,
+      tickets,
+      income: income._sum.amount || 0,
+      unpaidOrders,
+      paidPendingOrders,
+      expiringServers,
+      openTickets,
+      daily
+    });
   }));
 
   app.get('/api/admin/users', requireAdmin, asyncRoute(async (_req, res) => {

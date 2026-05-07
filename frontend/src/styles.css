@@ -134,6 +134,15 @@ a {
   resize: vertical;
 }
 
+.modal-panel .product-form {
+  grid-template-columns: 1fr 1fr;
+}
+
+.modal-panel .product-form textarea,
+.modal-panel .product-form button {
+  grid-column: 1 / -1;
+}
+
 .muted {
   color: var(--muted);
 }
@@ -319,7 +328,7 @@ a {
   inset: 0;
   background:
     linear-gradient(90deg, rgba(12, 24, 43, 0.95), rgba(12, 24, 43, 0.62), rgba(12, 24, 43, 0.34)),
-    url("https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1800&q=80") center / cover;
+    url("/assets/datacenter.svg") center / cover;
 }
 
 .hero-content {
@@ -571,7 +580,7 @@ a {
   border-radius: 8px;
   background:
     linear-gradient(180deg, rgba(22, 34, 52, 0.02), rgba(22, 34, 52, 0.2)),
-    url("https://images.unsplash.com/photo-1580894894513-541e068a3e2b?auto=format&fit=crop&w=1200&q=80") center / cover;
+    url("/assets/datacenter.svg") center / cover;
   box-shadow: 0 22px 46px rgba(26, 41, 64, 0.16);
 }
 
@@ -619,7 +628,7 @@ a {
 .page-hero {
   background:
     linear-gradient(90deg, rgba(13, 32, 58, 0.95), rgba(16, 62, 111, 0.76)),
-    url("https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=1600&q=80") center / cover;
+    url("/assets/datacenter.svg") center / cover;
   color: white;
   padding: 96px 0;
 }
@@ -1018,6 +1027,15 @@ th {
   background: #f7f9fc;
 }
 
+.admin-search input {
+  width: 100%;
+  min-height: 38px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+}
+
 .admin-user {
   display: inline-flex;
   align-items: center;
@@ -1039,20 +1057,59 @@ th {
 }
 
 .chart-bars {
-  height: 260px;
-  display: flex;
-  align-items: end;
+  min-height: 300px;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(72px, 1fr));
   gap: 18px;
   padding: 20px;
   background: #f7faff;
   border-radius: 8px;
+  overflow-x: auto;
 }
 
-.chart-bars i {
+.chart-day {
+  min-width: 72px;
+  display: grid;
+  grid-template-rows: 1fr auto auto auto;
+  gap: 6px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-stack {
+  height: 180px;
+  display: flex;
+  align-items: end;
+  justify-content: center;
+  gap: 5px;
+}
+
+.chart-stack i {
   flex: 1;
-  min-width: 18px;
+  max-width: 24px;
+  min-width: 14px;
   border-radius: 5px 5px 0 0;
+}
+
+.chart-stack .orders {
   background: linear-gradient(180deg, var(--primary), var(--cyan));
+}
+
+.chart-stack .income {
+  background: linear-gradient(180deg, var(--green), #8bd8b2);
+}
+
+.chart-day strong {
+  color: var(--text);
+}
+
+.chart-day em {
+  font-style: normal;
+}
+
+.ops-grid {
+  margin-top: 18px;
 }
 
 .admin-form-panel {
@@ -1077,6 +1134,7 @@ th {
 .admin-form input,
 .admin-form select,
 .admin-form textarea,
+.modal-form select,
 .settings-grid input,
 .login-form-card input {
   width: 100%;
@@ -1086,6 +1144,18 @@ th {
   border-radius: 7px;
   background: white;
   color: var(--text);
+}
+
+.action-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.empty-cell {
+  padding: 28px;
+  text-align: center;
+  color: var(--muted);
 }
 
 .admin-form textarea {
@@ -1113,7 +1183,7 @@ th {
   grid-template-columns: 1fr 1fr;
   background:
     linear-gradient(90deg, rgba(18, 31, 54, 0.78), rgba(18, 31, 54, 0.18)),
-    url("https://images.unsplash.com/photo-1518709268805-4e9042af2176?auto=format&fit=crop&w=1800&q=80") center / cover;
+    url("/assets/datacenter.svg") center / cover;
 }
 
 .login-visual {

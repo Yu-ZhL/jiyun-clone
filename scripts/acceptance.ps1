@@ -56,8 +56,16 @@ if ($me.username -ne $username) { throw 'auth me mismatch' }
 $admin = Call-Api POST '/api/admin/auth/login' @{ username = 'admin'; password = '123456' } $adminSession
 $adminMe = Call-Api GET '/api/admin/auth/me' $null $adminSession
 if ($adminMe.username -ne 'admin') { throw 'admin me mismatch' }
+$dashboard = Call-Api GET '/api/admin/dashboard/summary' $null $adminSession
+if (@($dashboard.daily).Count -ne 7) { throw 'dashboard daily metrics missing' }
 
 $newProduct = Call-Api POST '/api/admin/products' @{ name = "Acceptance VPS $suffix"; priceMonthly = 66; priceYearly = 660; stock = 5 } $adminSession
+$updatedProduct = Call-Api PUT "/api/admin/products/$($newProduct.id)" @{ name = "Acceptance VPS Updated $suffix"; priceMonthly = 77; priceYearly = 770; stock = 6; cpu = '4 vCPU'; memory = '8 GB'; disk = '120 GB SSD'; bandwidth = '20M CN2'; defense = '30G 防护' } $adminSession
+if ($updatedProduct.name -notmatch 'Updated' -or $updatedProduct.stock -ne 6) { throw 'admin product edit failed' }
+Call-Api POST "/api/admin/products/$($newProduct.id)/off-sale" $null $adminSession | Out-Null
+$offSaleProducts = Call-Api GET '/api/products' $null $userSession
+if ($offSaleProducts | Where-Object { $_.id -eq $newProduct.id }) { throw 'off-sale product still visible publicly' }
+Call-Api POST "/api/admin/products/$($newProduct.id)/on-sale" $null $adminSession | Out-Null
 $products = Call-Api GET '/api/products' $null $userSession
 if (-not ($products | Where-Object { $_.id -eq $newProduct.id })) {
   throw 'new product not visible publicly'
@@ -67,8 +75,22 @@ $order = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'mon
 $users = Call-Api GET '/api/admin/users' $null $adminSession
 $createdUser = $users | Where-Object { $_.username -eq $username } | Select-Object -First 1
 if (-not $createdUser) { throw 'registered user not in admin users' }
+$editedUser = Call-Api PUT "/api/admin/users/$($createdUser.id)" @{ email = "edited-$email"; phone = '852-0000-0000'; status = 'active' } $adminSession
+if ($editedUser.email -ne "edited-$email" -or $editedUser.phone -ne '852-0000-0000') { throw 'admin user edit failed' }
+Call-Api POST "/api/admin/users/$($createdUser.id)/disable" $null $adminSession | Out-Null
+Call-Api POST "/api/admin/users/$($createdUser.id)/enable" $null $adminSession | Out-Null
 
 Call-Api POST "/api/admin/users/$($createdUser.id)/adjust-balance" @{ amount = 1000; remark = 'acceptance recharge' } $adminSession | Out-Null
+$cancelOrder = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession
+$cancelled = Call-Api POST "/api/admin/orders/$($cancelOrder.id)/cancel" $null $adminSession
+if ($cancelled.payStatus -ne 'cancelled') { throw 'admin order cancel failed' }
+
+$refundOrder = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession
+$refundPaid = Call-Api POST "/api/orders/$($refundOrder.id)/pay-with-balance" $null $userSession
+if ($refundPaid.payStatus -ne 'paid') { throw 'refund setup payment failed' }
+$refunded = Call-Api POST "/api/admin/orders/$($refundOrder.id)/refund" @{ remark = 'acceptance refund' } $adminSession
+if ($refunded.payStatus -ne 'refunded') { throw 'admin order refund failed' }
+
 $paid = Call-Api POST "/api/orders/$($order.id)/pay-with-balance" $null $userSession
 if ($paid.payStatus -ne 'paid') { throw 'balance payment failed' }
 
@@ -91,6 +113,14 @@ $clientServer = $servers | Where-Object { $_.id -eq $server.id } | Select-Object
 if (-not $clientServer -or $clientServer.loginPassword -ne 'Secret!234') {
   throw 'client server not visible or password decrypt failed'
 }
+$editedServer = Call-Api PUT "/api/admin/servers/$($server.id)" @{ name = "ACC-EDIT-$suffix"; ip = '10.88.66.11'; os = 'Debian 12'; loginUser = 'adminroot'; expiresAt = (Get-Date).AddDays(40).ToString('yyyy-MM-dd') } $adminSession
+if ($editedServer.name -notmatch 'ACC-EDIT' -or $editedServer.ip -ne '10.88.66.11') { throw 'admin server edit failed' }
+$suspendedServer = Call-Api POST "/api/admin/servers/$($server.id)/suspend" $null $adminSession
+if ($suspendedServer.status -ne 'suspended') { throw 'admin server suspend failed' }
+$resumedServer = Call-Api POST "/api/admin/servers/$($server.id)/resume" $null $adminSession
+if ($resumedServer.status -ne 'running') { throw 'admin server resume failed' }
+$extendedServer = Call-Api POST "/api/admin/servers/$($server.id)/extend" @{ cycle = 'monthly' } $adminSession
+if ([DateTime]$extendedServer.expiresAt -le [DateTime]$editedServer.expiresAt) { throw 'admin server extend failed' }
 
 $renewOrder = Call-Api POST "/api/client/servers/$($server.id)/renew" @{ cycle = 'monthly' } $userSession
 $renewPaid = Call-Api POST "/api/orders/$($renewOrder.id)/pay-with-balance" $null $userSession
@@ -107,6 +137,8 @@ if ([DateTime]$serverAfterManualRenew.expiresAt -le [DateTime]$serverBeforeManua
 
 $ticket = Call-Api POST '/api/client/tickets' @{ title = "Acceptance ticket $suffix"; content = 'Please check server.' } $userSession
 Call-Api POST "/api/admin/tickets/$($ticket.id)/replies" @{ content = 'Acceptance reply.' } $adminSession | Out-Null
+$closedTicket = Call-Api POST "/api/admin/tickets/$($ticket.id)/close" $null $adminSession
+if ($closedTicket.status -ne 'closed') { throw 'admin ticket close failed' }
 
 $tokenResult = Call-Api POST "/api/admin/users/$($createdUser.id)/impersonate" $null $adminSession
 $impersonated = Call-Api POST '/api/auth/impersonate' @{ token = $tokenResult.token } (New-Object Microsoft.PowerShell.Commands.WebRequestSession)
@@ -146,6 +178,7 @@ if ($dbServer -match 'Secret!234') { throw 'plain server password stored' }
   manualRenewalOrder = $manualRenewOrder.orderNo
   ticketId = $ticket.id
   siteName = $siteSettings.site_name
+  dashboardDays = @($dashboard.daily).Count
   impersonationOneTime = $tokenReuseFailed
   walletTransactions = @($wallet).Count
   operationLogs = @($logs).Count
