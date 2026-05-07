@@ -173,13 +173,17 @@ function todayPlus(days) {
 
 function App() {
   const [state, setState] = useState(loadState);
-  const [route, setRoute] = useState(() => window.location.hash.replace('#', '') || '/');
+  const [route, setRoute] = useState(getRoute);
   const [mobileNav, setMobileNav] = useState(false);
 
   useEffect(() => {
-    const onHash = () => setRoute(window.location.hash.replace('#', '') || '/');
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    const onRoute = () => setRoute(getRoute());
+    window.addEventListener('hashchange', onRoute);
+    window.addEventListener('popstate', onRoute);
+    return () => {
+      window.removeEventListener('hashchange', onRoute);
+      window.removeEventListener('popstate', onRoute);
+    };
   }, []);
 
   useEffect(() => {
@@ -188,7 +192,8 @@ function App() {
 
   const currentUser = state.users.find((user) => user.id === state.currentUserId) || state.users[0];
   const navigate = (nextRoute) => {
-    window.location.hash = nextRoute;
+    window.history.pushState(null, '', nextRoute);
+    setRoute(getRoute());
     setMobileNav(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -229,15 +234,16 @@ function App() {
     }
   };
 
-  const sharedProps = { state, currentUser, actions };
-  const isAdmin = route.startsWith('/admin');
-  const isClient = route.startsWith('/client');
+  const routePath = route.split('?')[0];
+  const sharedProps = { state, currentUser, actions, route, routePath };
+  const isAdmin = routePath.startsWith('/admin');
+  const isClient = routePath.startsWith('/client');
 
   return (
     <div className={isAdmin ? 'app admin-shell-bg' : 'app'}>
       {!isAdmin && <PublicHeader route={route} mobileNav={mobileNav} setMobileNav={setMobileNav} {...sharedProps} />}
-      {route === '/' && <HomePage {...sharedProps} />}
-      {route === '/buy' && <BuyPage {...sharedProps} />}
+      {routePath === '/' && <HomePage {...sharedProps} />}
+      {routePath === '/buy' && <BuyPage {...sharedProps} />}
       {isClient && <ClientDashboard {...sharedProps} />}
       {isAdmin && <AdminApp {...sharedProps} />}
       {!isAdmin && <PublicFooter />}
@@ -245,7 +251,14 @@ function App() {
   );
 }
 
-function PublicHeader({ actions, currentUser, route, mobileNav, setMobileNav }) {
+function getRoute() {
+  const hashRoute = window.location.hash.replace(/^#/, '');
+  if (hashRoute) return hashRoute;
+  const path = window.location.pathname || '/';
+  return `${path}${window.location.search || ''}`;
+}
+
+function PublicHeader({ actions, currentUser, routePath, mobileNav, setMobileNav }) {
   const nav = [
     { label: hk.navHome, path: '/' },
     { label: hk.navProducts, path: '/buy' },
@@ -273,7 +286,7 @@ function PublicHeader({ actions, currentUser, route, mobileNav, setMobileNav }) 
         </button>
         <nav className={mobileNav ? 'nav-links open' : 'nav-links'}>
           {nav.map((item) => (
-            <button key={item.path + item.label} className={route === item.path ? 'active' : ''} onClick={() => actions.navigate(item.path)}>
+            <button key={item.path + item.label} className={routePath === item.path ? 'active' : ''} onClick={() => actions.navigate(item.path)}>
               {item.label}
             </button>
           ))}
@@ -408,8 +421,8 @@ function ProductGrid({ products, actions }) {
   );
 }
 
-function BuyPage({ state, actions }) {
-  const params = new URLSearchParams((window.location.hash.split('?')[1] || ''));
+function BuyPage({ state, actions, route }) {
+  const params = new URLSearchParams(route.split('?')[1] || '');
   const initial = params.get('product') || state.products[0]?.id;
   const [productId, setProductId] = useState(initial);
   const [cycle, setCycle] = useState('月付');
@@ -560,8 +573,14 @@ function Metric({ icon, label, value }) {
   );
 }
 
-function AdminApp({ state, actions }) {
-  const [section, setSection] = useState('dashboard');
+function AdminApp({ state, actions, routePath }) {
+  const [section, setSection] = useState(() => {
+    if (routePath.includes('/user')) return 'users';
+    if (routePath.includes('/server')) return 'servers';
+    if (routePath.includes('/order')) return 'orders';
+    if (routePath.includes('/product')) return 'products';
+    return 'dashboard';
+  });
   if (!state.adminAuthed) return <AdminLogin actions={actions} />;
   return (
     <main className="admin-shell">
