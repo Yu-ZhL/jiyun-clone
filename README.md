@@ -1,30 +1,48 @@
-# 极云主机管理系统仿站
+# 极云主机管理系统
 
-一个前端演示版主机管理系统，包含前台官网、服务器购买页、总后台、客户后台。数据保存在浏览器 `localStorage`，管理员可手动录入服务器信息，不接入第三方 API。
+本仓库正在按 `DEVELOPMENT_PLAN.md` 重构为可运营的全栈主机销售与管理系统。当前已进入阶段 1：前端、后端、MySQL 与 worker 采用 Docker Compose 编排。
 
-## 功能
+## 目录
 
-- 前台官网使用香港繁体文案
-- 服务器购买页支持月付 / 年付下单
-- 客户后台查看服务器、订单、工单与余额
-- 总后台使用简体中文，账号 `admin`，密码 `123456`
-- 总后台可新增产品、手动录入服务器、查看订单和用户
-- 用户管理里可以点击“进入前台”，模拟自动登录指定客户
+- `frontend/`：React + Vite 前台、客户后台和总后台入口，Nginx 代理 `/api`。
+- `backend/`：Node.js + Express API 服务，已接入 Prisma。
+- `docker-compose.yml`：启动前端、后端、worker 和 MySQL。
+- `docs/operation-plan/`：运营版阶段任务和验收标准。
 
-## 本地运行
+## Docker 运行
+
+首次启动前创建本地环境文件：
 
 ```bash
+cp .env.example .env
+```
+
+启动服务：
+
+```bash
+docker compose up -d --build
+```
+
+访问：
+
+- 前台：`http://localhost:8080`
+- 后台入口：`http://localhost:8080/admin`
+- 健康检查：`http://localhost:8080/api/health`
+
+## 本地开发
+
+前端：
+
+```bash
+cd frontend
 npm install
 npm run dev
 ```
 
-访问 `http://localhost:5173`。
-
-## Docker 运行
+后端：
 
 ```bash
-docker build -t jiyun-clone .
-docker run --rm -p 8080:80 jiyun-clone
+cd backend
+npm install
+npm run dev
 ```
-
-访问 `http://localhost:8080`。

@@ -1,0 +1,43 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  backend:
+    build: ./backend
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  worker:
+    build: ./backend
+    command: npm run worker
+    env_file:
+      - .env
+    depends_on:
+      mysql:
+        condition: service_healthy
+
+  mysql:
+    image: mysql:8
+    environment:
+      MYSQL_DATABASE: jiyun
+      MYSQL_USER: jiyun
+      MYSQL_PASSWORD: jiyun_password
+      MYSQL_ROOT_PASSWORD: root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -uroot -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+volumes:
+  mysql_data:
