@@ -273,7 +273,13 @@ export function createApp() {
     ok(res);
   });
 
-  app.get('/api/auth/me', requireUser, (req, res) => ok(res, publicUser(req.user)));
+  app.get('/api/auth/me', asyncRoute(async (req, res) => {
+    const payload = verifyToken(req.cookies[USER_COOKIE]);
+    if (!payload || payload.purpose !== 'user') return ok(res, null);
+    const user = await prisma.user.findUnique({ where: { id: payload.id } });
+    if (!user || user.status !== 'active') return ok(res, null);
+    ok(res, publicUser(user));
+  }));
 
   app.post('/api/auth/impersonate', asyncRoute(async (req, res) => {
     const { token } = req.body;
@@ -309,9 +315,13 @@ export function createApp() {
     ok(res);
   });
 
-  app.get('/api/admin/auth/me', requireAdmin, (req, res) => {
-    ok(res, { id: req.admin.id, username: req.admin.username, name: req.admin.name, role: req.admin.role });
-  });
+  app.get('/api/admin/auth/me', asyncRoute(async (req, res) => {
+    const payload = verifyToken(req.cookies[ADMIN_COOKIE]);
+    if (!payload || payload.purpose !== 'admin') return ok(res, null);
+    const admin = await prisma.admin.findUnique({ where: { id: payload.id } });
+    if (!admin || admin.status !== 'active') return ok(res, null);
+    ok(res, { id: admin.id, username: admin.username, name: admin.name, role: admin.role });
+  }));
 
   app.get('/api/products', asyncRoute(async (_req, res) => {
     ok(res, await prisma.product.findMany({ where: { status: 'on_sale' }, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }] }));

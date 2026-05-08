@@ -28,8 +28,10 @@ function Call-Api($Method, $Path, $Body, $Session) {
 }
 
 $frontResp = Invoke-WebRequest -UseBasicParsing "$BaseUrl/"
+$productsPageResp = Invoke-WebRequest -UseBasicParsing "$BaseUrl/products"
+$buyPageResp = Invoke-WebRequest -UseBasicParsing "$BaseUrl/buy"
 $adminResp = Invoke-WebRequest -UseBasicParsing "$BaseUrl/admin"
-if ($frontResp.StatusCode -ne 200 -or $adminResp.StatusCode -ne 200) {
+if ($frontResp.StatusCode -ne 200 -or $productsPageResp.StatusCode -ne 200 -or $buyPageResp.StatusCode -ne 200 -or $adminResp.StatusCode -ne 200) {
   throw 'frontend routes failed'
 }
 
@@ -60,7 +62,7 @@ $dashboard = Call-Api GET '/api/admin/dashboard/summary' $null $adminSession
 if (@($dashboard.daily).Count -ne 7) { throw 'dashboard daily metrics missing' }
 
 $newProduct = Call-Api POST '/api/admin/products' @{ name = "Acceptance VPS $suffix"; priceMonthly = 66; priceYearly = 660; stock = 5 } $adminSession
-$updatedProduct = Call-Api PUT "/api/admin/products/$($newProduct.id)" @{ name = "Acceptance VPS Updated $suffix"; priceMonthly = 77; priceYearly = 770; stock = 6; cpu = '4 vCPU'; memory = '8 GB'; disk = '120 GB SSD'; bandwidth = '20M CN2'; defense = '30G 防护' } $adminSession
+$updatedProduct = Call-Api PUT "/api/admin/products/$($newProduct.id)" @{ name = "Acceptance VPS Updated $suffix"; priceMonthly = 77; priceYearly = 770; stock = 6; cpu = '4 vCPU'; memory = '8 GB'; disk = '120 GB SSD'; bandwidth = '20M CN2'; defense = '30G DDoS' } $adminSession
 if ($updatedProduct.name -notmatch 'Updated' -or $updatedProduct.stock -ne 6) { throw 'admin product edit failed' }
 Call-Api POST "/api/admin/products/$($newProduct.id)/off-sale" $null $adminSession | Out-Null
 $offSaleProducts = Call-Api GET '/api/products' $null $userSession
@@ -151,6 +153,8 @@ try {
 if (-not $tokenReuseFailed) { throw 'impersonation token reused successfully' }
 
 $jobs = Call-Api POST '/api/admin/jobs/run' $null $adminSession
+$cleanupProduct = Call-Api POST "/api/admin/products/$($newProduct.id)/off-sale" $null $adminSession
+if ($cleanupProduct.status -ne 'off_sale') { throw 'acceptance product cleanup failed' }
 $logs = Call-Api GET '/api/admin/operation-logs' $null $adminSession
 if (-not ($logs | Where-Object { $_.action -eq 'open_server' -and $_.targetId -eq $server.id })) {
   throw 'open_server operation log missing'
@@ -168,6 +172,8 @@ if ($dbServer -match 'Secret!234') { throw 'plain server password stored' }
 
 [PSCustomObject]@{
   frontendHome = $frontResp.StatusCode
+  frontendProducts = $productsPageResp.StatusCode
+  frontendBuy = $buyPageResp.StatusCode
   frontendAdmin = $adminResp.StatusCode
   health = $health.database
   registeredUser = $username

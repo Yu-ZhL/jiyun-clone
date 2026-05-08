@@ -35,7 +35,6 @@ const hk = {
   navProducts: '產品中心',
   navBuy: '伺服器購買',
   navConsole: '控制台',
-  navAdmin: '總後台',
   login: '登 錄',
   register: '註 冊',
   heroTitle: '香港伺服器',
@@ -167,6 +166,12 @@ function App() {
   }, [isAdmin]);
 
   useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(''), 4200);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     if (routePath === '/login/impersonate') {
       const token = new URLSearchParams(route.split('?')[1] || '').get('token');
       if (token) {
@@ -204,6 +209,7 @@ function App() {
       {!isAdmin && <PublicHeader mobileNav={mobileNav} setMobileNav={setMobileNav} {...shared} />}
       {notice && <div className="toast">{notice}<button onClick={() => setNotice('')}><X size={16} /></button></div>}
       {routePath === '/' && <HomePage {...shared} />}
+      {routePath === '/products' && <ProductsPage {...shared} />}
       {routePath === '/buy' && <BuyPage {...shared} />}
       {routePath.startsWith('/client') && <ClientPortal {...shared} />}
       {isAdmin && <AdminPortal {...shared} />}
@@ -215,7 +221,7 @@ function App() {
 function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, siteSettings }) {
   const nav = [
     { label: hk.navHome, path: '/' },
-    { label: hk.navProducts, path: '/buy' },
+    { label: hk.navProducts, path: '/products' },
     { label: hk.navBuy, path: '/buy' },
     { label: hk.navConsole, path: '/client' }
   ];
@@ -240,7 +246,6 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, site
               {item.label}
             </button>
           ))}
-          <button onClick={() => navigate('/admin')} className="ghost-link">{hk.navAdmin}</button>
         </nav>
         <div className="nav-actions">
           <button className="text-btn" onClick={() => navigate('/client')}><LogIn size={16} />{user ? user.username : hk.login}</button>
@@ -255,30 +260,76 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, site
 }
 
 function HomePage({ products, navigate, siteSettings }) {
+  const heroSlides = [
+    {
+      kicker: '香港 T3+ 數據中心',
+      title: siteSettings.hero_title,
+      text: siteSettings.hero_subtitle
+    },
+    {
+      kicker: 'CN2 / BGP 優化線路',
+      title: '跨境業務穩定承載',
+      text: '面向企業網站、電商平台和 SaaS 業務，提供低延遲接入、高防清洗和可追蹤交付。'
+    },
+    {
+      kicker: '前台下單 / 後台開通',
+      title: '從訂單到伺服器全流程管理',
+      text: '產品、訂單、付款、開通、續費、到期提醒和工單都接入真實後端資料。'
+    }
+  ];
+  const [activeSlide, setActiveSlide] = useState(0);
   const cards = [
     { icon: <Zap />, title: '領先的產品技術', text: '提供中小企業及個人用戶友好的雲伺服器、高防及託管服務。' },
     { icon: <ShieldCheck />, title: '安全防護', text: '基於智能清洗策略，為核心業務提供穩定可靠的防護能力。' },
     { icon: <Headphones />, title: '無憂售後服務', text: '7x24 小時技術支援，電話、工單、客服多種方式快速響應。' }
   ];
+  const testimonials = [
+    ['跨境電商團隊', '香港節點延遲穩定，晚高峰訪問也沒有明顯波動，工單回覆比之前的供應商快很多。'],
+    ['SaaS 運維負責人', '後台能看到訂單、續費、到期和伺服器資料，人工開通模式也能保持清楚的交付記錄。'],
+    ['內容平台站長', '高防方案上線後攻擊期間服務沒有中斷，續費通知和站內通知對日常運維很有幫助。']
+  ];
+  const slide = heroSlides[activeSlide];
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setActiveSlide((index) => (index + 1) % heroSlides.length), 5200);
+    return () => window.clearInterval(timer);
+  }, [heroSlides.length]);
+
   return (
     <main>
       <section className="hero">
         <div className="hero-media" />
         <div className="container hero-content">
           <div className="hero-copy">
-            <span className="eyebrow">Hong Kong IDC Service</span>
-            <h1>{siteSettings.hero_title}</h1>
-            <p>{siteSettings.hero_subtitle}</p>
+            <span className="eyebrow">{slide.kicker}</span>
+            <h1>{slide.title}</h1>
+            <p>{slide.text}</p>
             <div className="hero-actions">
               <button className="primary" onClick={() => navigate('/buy')}>{hk.primaryCta}</button>
               <button className="secondary" onClick={() => navigate('/client')}>{hk.secondaryCta}</button>
             </div>
+            <div className="hero-dots" aria-label="首頁輪播">
+              {heroSlides.map((item, index) => (
+                <button key={item.kicker} className={index === activeSlide ? 'active' : ''} aria-label={`切換到第 ${index + 1} 張`} onClick={() => setActiveSlide(index)} />
+              ))}
+            </div>
           </div>
-          <div className="hero-panel">
-            <div><span>在線節點</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}+</strong></div>
-            <div><span>可售產品</span><strong>{products.length}</strong></div>
-            <div><span>交付時間</span><strong>人工開通</strong></div>
+          <div className="hero-showcase">
+            <img src="/assets/homepage-hero.png" alt="香港數據中心與雲伺服器機房" />
+            <div className="hero-panel">
+              <div><span>可售庫存</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}+</strong></div>
+              <div><span>產品方案</span><strong>{products.length}</strong></div>
+              <div><span>交付模式</span><strong>後台開通</strong></div>
+            </div>
           </div>
+        </div>
+      </section>
+      <section className="proof-rail">
+        <div className="container proof-grid">
+          <div><strong>CN2 / BGP</strong><span>香港優化線路</span></div>
+          <div><strong>7x24</strong><span>工單與運維支援</span></div>
+          <div><strong>AES</strong><span>伺服器密碼加密</span></div>
+          <div><strong>Docker</strong><span>前後台一鍵部署</span></div>
         </div>
       </section>
       <section className="container section">
@@ -289,14 +340,14 @@ function HomePage({ products, navigate, siteSettings }) {
       </section>
       <section className="product-band">
         <div className="container section">
-          <div className="section-title"><span>Hosting Products</span><h2>{hk.productTitle}</h2></div>
-          <ProductGrid products={products} navigate={navigate} />
+          <div className="section-title"><span>Hosting Products</span><h2>熱門主機方案</h2></div>
+          <ProductGrid products={products.slice(0, 3)} navigate={navigate} />
+          <div className="section-actions"><button className="secondary dark-text" onClick={() => navigate('/products')}>查看全部產品</button></div>
         </div>
       </section>
-      <section className="container split-section">
-        <div className="server-photo" />
+      <section className="container split-section media-feature">
+        <div className="server-photo"><img src="/assets/homepage-hero.png" alt="現代化數據中心機櫃" /></div>
         <div className="split-copy">
-          <span className="eyebrow">Powerful Platform</span>
           <h2>強大的伺服器和平台</h2>
           <p>採用多網融合技術、T3+ 數據中心和冗餘保護機制，協助企業拓展線上業務。</p>
           <div className="info-list">
@@ -307,7 +358,32 @@ function HomePage({ products, navigate, siteSettings }) {
           <button className="primary" onClick={() => navigate('/buy')}>從這裏開始</button>
         </div>
       </section>
+      <section className="testimonial-band">
+        <div className="container">
+          <div className="section-title"><span>Reviews</span><h2>客戶怎樣評價極雲</h2></div>
+          <div className="testimonial-track">
+            {testimonials.map(([name, text]) => <article key={name}><p>{text}</p><strong>{name}</strong></article>)}
+          </div>
+        </div>
+      </section>
       <ServiceStrip />
+    </main>
+  );
+}
+
+function ProductsPage({ products, navigate }) {
+  return (
+    <main>
+      <section className="page-hero product-hero">
+        <div className="container">
+          <h1>產品中心</h1>
+          <p>集中查看可售雲伺服器、高防及託管方案。這裏負責了解配置與價格，實際下單會進入伺服器購買頁。</p>
+        </div>
+      </section>
+      <section className="container section">
+        <div className="section-title"><span>Products</span><h2>全部可售方案</h2></div>
+        <ProductGrid products={products} navigate={navigate} />
+      </section>
     </main>
   );
 }
@@ -380,7 +456,7 @@ function BuyPage({ products, user, navigate, setNotice }) {
 
   return (
     <main className="buy-page">
-      <section className="page-hero"><div className="container"><span className="eyebrow">Product Center</span><h1>{hk.buyTitle}</h1><p>產品、價格與庫存均來自後端 API，下單後可在客戶後台完成余额支付。</p></div></section>
+      <section className="page-hero"><div className="container"><span className="eyebrow">Server Purchase</span><h1>{hk.buyTitle}</h1><p>產品、價格與庫存均來自後端 API，下單後可在客戶後台完成余额支付。</p></div></section>
       <section className="container buy-layout">
         <div className="catalog">
           <div className="toolbar">
@@ -445,11 +521,11 @@ function AuthPage({ refreshUser, setNotice }) {
         <p>登录、注册和会话保持均由后端接口处理</p>
         {mode === 'register' ? (
           <>
-            <label>用户名<input autoComplete="off" value={form.username} onChange={(event) => update('username', event.target.value)} required /></label>
-            <label>邮箱<input autoComplete="off" value={form.email} onChange={(event) => update('email', event.target.value)} required /></label>
+            <label htmlFor="client-username">用户名<input id="client-username" name="username" autoComplete="off" value={form.username} onChange={(event) => update('username', event.target.value)} required /></label>
+            <label htmlFor="client-email">邮箱<input id="client-email" name="email" autoComplete="off" value={form.email} onChange={(event) => update('email', event.target.value)} required /></label>
           </>
-        ) : <label>账号<input autoComplete="off" value={form.account} onChange={(event) => update('account', event.target.value)} required /></label>}
-        <label>密码<input autoComplete="new-password" type="password" value={form.password} onChange={(event) => update('password', event.target.value)} required /></label>
+        ) : <label htmlFor="client-account">账号<input id="client-account" name="account" autoComplete="off" value={form.account} onChange={(event) => update('account', event.target.value)} required /></label>}
+        <label htmlFor="client-password">密码<input id="client-password" name="password" autoComplete="new-password" type="password" value={form.password} onChange={(event) => update('password', event.target.value)} required /></label>
         <button className="primary wide" type="submit">{mode === 'login' ? '登 录' : '注 册'}</button>
         <div className="login-foot"><span>{mode === 'login' ? '没有账号？' : '已有账号？'}</span><button type="button" onClick={() => setMode(mode === 'login' ? 'register' : 'login')}>{mode === 'login' ? '注册' : '登录'}</button></div>
       </form>
@@ -577,12 +653,16 @@ function AdminLogin({ refreshAdmin, setNotice }) {
     }
   };
   return (
-    <main className="login-page">
-      <div className="login-visual"><div className="login-illustration"><Cloud size={72} /><h1>主机管理系统</h1><p>管理员账号由后端 seed 生成</p></div></div>
-      <form className="login-form-card" onSubmit={submit} autoComplete="off">
-        <h2>主机管理系统</h2><p>管理员中文后台，默认账号由 seed 创建</p>
-        <label>账户<input autoComplete="off" value={form.username} onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))} /></label>
-        <label>密码<input autoComplete="new-password" type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} /></label>
+    <main className="admin-login-page">
+      <div className="admin-login-visual">
+        <div className="admin-login-mark"><Settings size={30} /></div>
+        <h1>运营管理后台</h1>
+        <p>订单、产品、客户、服务器、财务流水和工单集中处理。</p>
+      </div>
+      <form className="login-form-card admin-login-card" onSubmit={submit} autoComplete="off">
+        <h2>管理员登录</h2><p>请输入后台管理员账号和密码</p>
+        <label htmlFor="admin-username">账户<input id="admin-username" name="username" autoComplete="off" value={form.username} onChange={(event) => setForm((prev) => ({ ...prev, username: event.target.value }))} /></label>
+        <label htmlFor="admin-password">密码<input id="admin-password" name="password" autoComplete="new-password" type="password" value={form.password} onChange={(event) => setForm((prev) => ({ ...prev, password: event.target.value }))} /></label>
         <button className="primary wide" type="submit">登 录</button>
       </form>
     </main>
@@ -592,6 +672,7 @@ function AdminLogin({ refreshAdmin, setNotice }) {
 function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProducts, refreshSiteSettings }) {
   const [section, setSection] = useState('dashboard');
   const [adminFilter, setAdminFilter] = useState('');
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [data, setData] = useState({ summary: {}, users: [], products: [], orders: [], servers: [], tickets: [], logs: [], settings: [] });
   const [productForm, setProductForm] = useState(emptyProductForm);
   const [serverForm, setServerForm] = useState({ orderId: '', name: '', ip: '', os: 'Ubuntu 22.04', loginUser: 'root', loginPassword: '', expiresAt: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) });
@@ -624,6 +705,16 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   const logout = async () => {
     await api('/api/admin/auth/logout', { method: 'POST' });
     await refreshAdmin();
+  };
+
+  const formatJobResult = (result) => {
+    const expiring = result.expiring?.scanned || 0;
+    const notices = result.expiring?.notifications || 0;
+    const expired = result.expired?.expired || 0;
+    const suspended = result.expired?.suspended || 0;
+    const cancelled = result.orders?.cancelled || 0;
+    const tokens = result.tokens?.cleaned || 0;
+    return `定时任务已完成：检查即将到期 ${expiring} 台，生成提醒 ${notices} 条，标记过期 ${expired} 台，暂停 ${suspended} 台，取消未支付订单 ${cancelled} 个，清理代登录 token ${tokens} 个。`;
   };
 
   const addProduct = async (event) => {
@@ -802,7 +893,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
 
   const runJobs = async () => {
     const result = await api('/api/admin/jobs/run', { method: 'POST' });
-    setNotice(`任务执行完成：${JSON.stringify(result)}`);
+    setNotice(formatJobResult(result));
     await load();
   };
 
@@ -845,9 +936,20 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
       </aside>
       <section className="admin-main">
         <div className="admin-top">
-          <label className="admin-search"><Search size={17} /><input value={adminFilter} onChange={(event) => setAdminFilter(event.target.value)} placeholder="搜索订单号 / 用户 / 产品 / IP / 工单" /></label>
+          <label className="admin-search" htmlFor="admin-global-search"><Search size={17} /><input id="admin-global-search" name="adminSearch" value={adminFilter} onChange={(event) => setAdminFilter(event.target.value)} placeholder="搜索订单号 / 用户 / 产品 / IP / 工单" /></label>
           <button className="icon-btn" onClick={() => setSection('tickets')} title="查看待处理工单"><Bell size={18} /></button>
-          <button className="admin-user" onClick={logout}><User size={17} />{admin.username}</button>
+          <div className="admin-user-menu">
+            <button className="admin-user" onClick={() => setAdminMenuOpen((value) => !value)}><User size={17} />{admin.username}</button>
+            {adminMenuOpen && (
+              <div className="admin-dropdown">
+                <strong>{admin.name || admin.username}</strong>
+                <span>{admin.role || 'administrator'}</span>
+                <button onClick={() => { setSection('logs'); setAdminMenuOpen(false); }}>系统设置</button>
+                <button onClick={() => { setSection('tickets'); setAdminMenuOpen(false); }}>工单处理</button>
+                <button onClick={logout}>退出登录</button>
+              </div>
+            )}
+          </div>
         </div>
         {section === 'dashboard' && <AdminSummary summary={data.summary} runJobs={runJobs} />}
         {section === 'products' && <AdminProducts products={data.products} keyword={adminFilter} form={productForm} setForm={setProductForm} addProduct={addProduct} updateProductStatus={updateProductStatus} openProductEdit={openProductEdit} />}
