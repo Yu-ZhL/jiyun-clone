@@ -4,6 +4,8 @@ import {
   Bell,
   Boxes,
   Check,
+  ChevronLeft,
+  ChevronRight,
   CircleDollarSign,
   Cloud,
   CreditCard,
@@ -101,6 +103,24 @@ function dateInput(value) {
   if (!value) return '';
   return new Date(value).toISOString().slice(0, 10);
 }
+
+const orderTypeLabels = {
+  new_server: '新购服务器',
+  renew_server: '续费订单'
+};
+
+const payStatusLabels = {
+  unpaid: '待支付',
+  paid: '已支付',
+  cancelled: '已取消',
+  refunded: '已退款'
+};
+
+const provisionStatusLabels = {
+  none: '无需开通',
+  pending: '待开通',
+  opened: '已开通'
+};
 
 function textIncludes(value, keyword) {
   return String(value || '').toLowerCase().includes(keyword.toLowerCase());
@@ -213,7 +233,7 @@ function App() {
       {routePath === '/buy' && <BuyPage {...shared} />}
       {routePath.startsWith('/client') && <ClientPortal {...shared} />}
       {isAdmin && <AdminPortal {...shared} />}
-      {!isAdmin && <PublicFooter siteSettings={siteSettings} />}
+      {!isAdmin && <PublicFooter siteSettings={siteSettings} navigate={navigate} />}
     </div>
   );
 }
@@ -232,7 +252,7 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, site
           <span>{siteSettings.support_phone}</span>
           <span>{siteSettings.support_email}</span>
           <button onClick={() => navigate('/client')}>控制台</button>
-          <button onClick={() => navigate('/client')}>提交工單</button>
+          <button onClick={() => navigate('/client?tickets')}>提交工單</button>
         </div>
       </div>
       <div className="container nav-row">
@@ -248,8 +268,8 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, site
           ))}
         </nav>
         <div className="nav-actions">
-          <button className="text-btn" onClick={() => navigate('/client')}><LogIn size={16} />{user ? user.username : hk.login}</button>
-          <button className="primary small" onClick={() => navigate(user ? '/buy' : '/client')}>{user ? hk.primaryCta : hk.register}</button>
+          <button className="text-btn" onClick={() => navigate(user ? '/client' : '/client?auth=login')}><LogIn size={16} />{user ? user.username : hk.login}</button>
+          <button className="primary small" onClick={() => navigate(user ? '/buy' : '/client?auth=register')}>{user ? hk.primaryCta : hk.register}</button>
           <button className="icon-btn mobile-only" aria-label="menu" onClick={() => setMobileNav((value) => !value)}>
             {mobileNav ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -264,43 +284,60 @@ function HomePage({ products, navigate, siteSettings }) {
     {
       kicker: '香港 T3+ 數據中心',
       title: siteSettings.hero_title,
-      text: siteSettings.hero_subtitle
+      text: siteSettings.hero_subtitle,
+      image: '/assets/homepage-slide-1.png',
+      stats: [['可售庫存', `${products.reduce((sum, product) => sum + product.stock, 0)}+`], ['產品方案', String(products.length)], ['交付模式', '後台開通']]
     },
     {
       kicker: 'CN2 / BGP 優化線路',
       title: '跨境業務穩定承載',
-      text: '面向企業網站、電商平台和 SaaS 業務，提供低延遲接入、高防清洗和可追蹤交付。'
+      text: '面向企業網站、電商平台和 SaaS 業務，提供低延遲接入、高防清洗和可追蹤交付。',
+      image: '/assets/homepage-slide-2.png',
+      stats: [['線路策略', 'CN2/BGP'], ['節點視野', 'Global'], ['網絡監控', '7x24']]
     },
     {
-      kicker: '前台下單 / 後台開通',
-      title: '從訂單到伺服器全流程管理',
-      text: '產品、訂單、付款、開通、續費、到期提醒和工單都接入真實後端資料。'
+      kicker: '高防安全架構',
+      title: '為核心業務抵禦流量攻擊',
+      text: '高防清洗、伺服器密碼加密、到期任務與操作日志共同支撐可追蹤的運營交付。',
+      image: '/assets/homepage-slide-3.png',
+      stats: [['防護能力', 'DDoS'], ['密碼保存', 'AES'], ['操作日志', '全量']]
     }
   ];
   const [activeSlide, setActiveSlide] = useState(0);
+  const [testimonialIndex, setTestimonialIndex] = useState(0);
   const cards = [
     { icon: <Zap />, title: '領先的產品技術', text: '提供中小企業及個人用戶友好的雲伺服器、高防及託管服務。' },
     { icon: <ShieldCheck />, title: '安全防護', text: '基於智能清洗策略，為核心業務提供穩定可靠的防護能力。' },
     { icon: <Headphones />, title: '無憂售後服務', text: '7x24 小時技術支援，電話、工單、客服多種方式快速響應。' }
   ];
   const testimonials = [
-    ['跨境電商團隊', '香港節點延遲穩定，晚高峰訪問也沒有明顯波動，工單回覆比之前的供應商快很多。'],
-    ['SaaS 運維負責人', '後台能看到訂單、續費、到期和伺服器資料，人工開通模式也能保持清楚的交付記錄。'],
-    ['內容平台站長', '高防方案上線後攻擊期間服務沒有中斷，續費通知和站內通知對日常運維很有幫助。']
+    ['跨境電商團隊', '香港節點延遲穩定，晚高峰訪問也沒有明顯波動，工單回覆比之前的供應商快很多。', 'HK / CN2'],
+    ['SaaS 運維負責人', '後台能看到訂單、續費、到期和伺服器資料，人工開通模式也能保持清楚的交付記錄。', 'OPS'],
+    ['內容平台站長', '高防方案上線後攻擊期間服務沒有中斷，續費通知和站內通知對日常運維很有幫助。', 'DDoS'],
+    ['遊戲社群運營', '活動高峰期登入和支付都很平穩，伺服器資料、續費和工單可以直接在同一個後台處理。', 'Peak'],
+    ['出海工具團隊', '採購、開通、續費和到期提醒一條鏈路走完，財務流水也能對上每一筆訂單。', 'Finance']
   ];
+  const visibleTestimonials = testimonials.map((item, offset) => testimonials[(testimonialIndex + offset) % testimonials.length]).slice(0, 3);
   const slide = heroSlides[activeSlide];
+  const goSlide = (direction) => setActiveSlide((index) => (index + direction + heroSlides.length) % heroSlides.length);
+  const goTestimonial = (direction) => setTestimonialIndex((index) => (index + direction + testimonials.length) % testimonials.length);
 
   useEffect(() => {
     const timer = window.setInterval(() => setActiveSlide((index) => (index + 1) % heroSlides.length), 5200);
     return () => window.clearInterval(timer);
   }, [heroSlides.length]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => goTestimonial(1), 6200);
+    return () => window.clearInterval(timer);
+  }, [testimonials.length]);
+
   return (
     <main>
-      <section className="hero">
-        <div className="hero-media" />
+      <section className="hero" style={{ '--hero-image': `url("${slide.image}")` }}>
+        <div className="hero-media" key={slide.image} />
         <div className="container hero-content">
-          <div className="hero-copy">
+          <div className="hero-copy" key={slide.title}>
             <span className="eyebrow">{slide.kicker}</span>
             <h1>{slide.title}</h1>
             <p>{slide.text}</p>
@@ -313,13 +350,15 @@ function HomePage({ products, navigate, siteSettings }) {
                 <button key={item.kicker} className={index === activeSlide ? 'active' : ''} aria-label={`切換到第 ${index + 1} 張`} onClick={() => setActiveSlide(index)} />
               ))}
             </div>
+            <div className="hero-arrows">
+              <button aria-label="上一張輪播" onClick={() => goSlide(-1)}><ChevronLeft size={20} /></button>
+              <button aria-label="下一張輪播" onClick={() => goSlide(1)}><ChevronRight size={20} /></button>
+            </div>
           </div>
-          <div className="hero-showcase">
-            <img src="/assets/homepage-hero.png" alt="香港數據中心與雲伺服器機房" />
+          <div className="hero-showcase" key={`${slide.image}-showcase`}>
+            <img src={slide.image} alt={`${slide.title}場景`} />
             <div className="hero-panel">
-              <div><span>可售庫存</span><strong>{products.reduce((sum, product) => sum + product.stock, 0)}+</strong></div>
-              <div><span>產品方案</span><strong>{products.length}</strong></div>
-              <div><span>交付模式</span><strong>後台開通</strong></div>
+              {slide.stats.map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
             </div>
           </div>
         </div>
@@ -346,7 +385,7 @@ function HomePage({ products, navigate, siteSettings }) {
         </div>
       </section>
       <section className="container split-section media-feature">
-        <div className="server-photo"><img src="/assets/homepage-hero.png" alt="現代化數據中心機櫃" /></div>
+        <div className="server-photo"><img src="/assets/homepage-slide-2.png" alt="香港雲伺服器全球網絡鏈路" /></div>
         <div className="split-copy">
           <h2>強大的伺服器和平台</h2>
           <p>採用多網融合技術、T3+ 數據中心和冗餘保護機制，協助企業拓展線上業務。</p>
@@ -360,9 +399,23 @@ function HomePage({ products, navigate, siteSettings }) {
       </section>
       <section className="testimonial-band">
         <div className="container">
-          <div className="section-title"><span>Reviews</span><h2>客戶怎樣評價極雲</h2></div>
-          <div className="testimonial-track">
-            {testimonials.map(([name, text]) => <article key={name}><p>{text}</p><strong>{name}</strong></article>)}
+          <div className="testimonial-head">
+            <div className="section-title"><span>Reviews</span><h2>客戶怎樣評價極雲</h2></div>
+            <div className="testimonial-controls">
+              <button aria-label="上一組評價" onClick={() => goTestimonial(-1)}><ChevronLeft size={20} /></button>
+              <button aria-label="下一組評價" onClick={() => goTestimonial(1)}><ChevronRight size={20} /></button>
+            </div>
+          </div>
+          <div className="testimonial-window">
+            <div className="testimonial-track" key={testimonialIndex}>
+              {visibleTestimonials.map(([name, text, tag]) => (
+                <article key={name}>
+                  <span>{tag}</span>
+                  <p>{text}</p>
+                  <strong>{name}</strong>
+                </article>
+              ))}
+            </div>
           </div>
         </div>
       </section>
@@ -433,6 +486,7 @@ function BuyPage({ products, user, navigate, setNotice }) {
   const [productId, setProductId] = useState(params.get('product') || '');
   const [cycle, setCycle] = useState('monthly');
   const product = products.find((item) => item.id === productId) || products[0];
+  const orderAmount = product ? (cycle === 'yearly' ? product.priceYearly : product.priceMonthly) : 0;
 
   useEffect(() => {
     if (!productId && products[0]) setProductId(products[0].id);
@@ -440,13 +494,17 @@ function BuyPage({ products, user, navigate, setNotice }) {
 
   const createOrder = async () => {
     if (!user) {
-      navigate('/client');
+      navigate('/client?auth=login');
+      return;
+    }
+    if (Number(user.balance || 0) < Number(orderAmount || 0)) {
+      setNotice(`余额不足：当前余额 ${formatMoney(user.balance)}，本次需 ${formatMoney(orderAmount)}。请先联系管理员充值后再提交订单。`);
       return;
     }
     try {
       const order = await api('/api/orders', { method: 'POST', body: { productId: product.id, cycle } });
-      setNotice(`订单 ${order.orderNo} 已创建`);
-      navigate('/client');
+      setNotice(`订单 ${order.orderNo || '-'} 已创建，请在客户后台完成余额支付。`);
+      navigate('/client?section=orders');
     } catch (error) {
       setNotice(error.message);
     }
@@ -482,9 +540,9 @@ function BuyPage({ products, user, navigate, setNotice }) {
             <div><dt>配置</dt><dd>{product.cpu} / {product.memory}</dd></div>
             <div><dt>週期</dt><dd>{cycle === 'yearly' ? '年付' : '月付'}</dd></div>
           </dl>
-          <div className="total"><span>合計</span><strong>{formatMoney(cycle === 'yearly' ? product.priceYearly : product.priceMonthly)}</strong></div>
+          <div className="total"><span>合計</span><strong>{formatMoney(orderAmount)}</strong></div>
           <button className="primary wide" onClick={createOrder}><ShoppingCart size={18} />提交訂單</button>
-          <p>{user ? '订单创建后可在客户后台选择余额支付。' : '請先登入或註冊客戶賬號。'}</p>
+          <p>{user ? `当前余额 ${formatMoney(user.balance)}，余额不足时不会创建订单。` : '請先登入或註冊客戶賬號。'}</p>
         </aside>
       </section>
     </main>
@@ -496,10 +554,16 @@ function ClientPortal(props) {
   return <ClientDashboard {...props} />;
 }
 
-function AuthPage({ refreshUser, setNotice }) {
-  const [mode, setMode] = useState('login');
+function AuthPage({ refreshUser, setNotice, route }) {
+  const authQuery = new URLSearchParams(route.split('?')[1] || '').get('auth');
+  const [mode, setMode] = useState(authQuery === 'register' ? 'register' : 'login');
   const [form, setForm] = useState({ username: '', email: '', account: '', password: '' });
   const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+  useEffect(() => {
+    const nextMode = new URLSearchParams(route.split('?')[1] || '').get('auth');
+    if (nextMode === 'register') setMode('register');
+    else setMode('login');
+  }, [route]);
   const submit = async (event) => {
     event.preventDefault();
     try {
@@ -533,8 +597,9 @@ function AuthPage({ refreshUser, setNotice }) {
   );
 }
 
-function ClientDashboard({ user, navigate, setNotice, refreshUser }) {
-  const [section, setSection] = useState('overview');
+function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
+  const routeQuery = new URLSearchParams(route.split('?')[1] || '');
+  const [section, setSection] = useState(routeQuery.has('tickets') ? 'tickets' : routeQuery.get('section') || 'overview');
   const [data, setData] = useState({ summary: null, orders: [], servers: [], wallet: [], tickets: [], notifications: [] });
   const [ticket, setTicket] = useState({ title: '', content: '' });
   const clientMenu = [
@@ -560,6 +625,11 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser }) {
   };
 
   useEffect(() => { load().catch((error) => setNotice(error.message)); }, []);
+  useEffect(() => {
+    const query = new URLSearchParams(route.split('?')[1] || '');
+    if (query.has('tickets')) setSection('tickets');
+    else if (query.get('section')) setSection(query.get('section'));
+  }, [route]);
 
   const pay = async (orderId) => {
     try {
@@ -616,13 +686,13 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser }) {
               <Metric icon={<Bell />} label="未读通知" value={data.summary?.unreadNotifications || 0} />
             </div>
             <div className="two-col">
-              <Panel title="最近订单"><Rows rows={data.orders.slice(0, 6).map((order) => ({ left: order.orderNo, mid: formatMoney(order.amount), right: order.payStatus, action: order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : null }))} /></Panel>
+              <Panel title="最近订单"><Rows rows={data.orders.slice(0, 6).map((order) => ({ left: order.orderNo, mid: formatMoney(order.amount), right: payStatusLabels[order.payStatus] || order.payStatus, action: order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : null }))} /></Panel>
               <Panel title="最近通知"><Rows rows={data.notifications.slice(0, 6).map((item) => ({ left: item.title, mid: formatDate(item.createdAt), right: item.readAt ? '已读' : '未读' }))} /></Panel>
             </div>
           </>
         )}
         {section === 'servers' && <Panel title="我的服务器"><DataTable columns={['名称', 'IP', '系统', '登录', '到期时间', '状态', '操作']} rows={data.servers.map((server) => [server.name, server.ip, server.os, `${server.loginUser} / ${server.loginPassword}`, formatDate(server.expiresAt), server.status, <button className="table-action" onClick={() => renew(server.id)}>续费</button>])} /></Panel>}
-        {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单号', '产品', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [order.orderNo, order.product?.name || '-', order.type, formatMoney(order.amount), order.payStatus, order.provisionStatus, order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : '-'])} /></Panel>}
+        {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单号', '产品', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [order.orderNo, order.product?.name || '-', orderTypeLabels[order.type] || order.type, formatMoney(order.amount), <StatusPill value={order.payStatus} labels={payStatusLabels} />, <StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />, order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : '-'])} /></Panel>}
         {section === 'tickets' && (
           <div className="two-col">
             <Panel title="提交工单"><form className="admin-form ticket-form" onSubmit={submitTicket}><input placeholder="标题" value={ticket.title} onChange={(event) => setTicket((prev) => ({ ...prev, title: event.target.value }))} required /><input placeholder="内容" value={ticket.content} onChange={(event) => setTicket((prev) => ({ ...prev, content: event.target.value }))} required /><button className="primary" type="submit">提交</button></form></Panel>
@@ -681,6 +751,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   const [userForm, setUserForm] = useState({ open: false, user: null, email: '', phone: '', status: 'active' });
   const [productEditForm, setProductEditForm] = useState({ open: false, product: null, values: emptyProductForm });
   const [serverEditForm, setServerEditForm] = useState({ open: false, server: null, values: {} });
+  const [passwordForm, setPasswordForm] = useState({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' });
   const [settingsForm, setSettingsForm] = useState({});
 
   const load = async () => {
@@ -897,6 +968,24 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
     await load();
   };
 
+  const submitAdminPassword = async (event) => {
+    event.preventDefault();
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      setNotice('两次输入的新密码不一致');
+      return;
+    }
+    try {
+      await api('/api/admin/auth/change-password', {
+        method: 'POST',
+        body: { currentPassword: passwordForm.currentPassword, newPassword: passwordForm.newPassword }
+      });
+      setPasswordForm({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' });
+      setNotice('管理员密码已修改');
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
   const submitReply = async (event) => {
     event.preventDefault();
     if (!replyForm.ticket) return;
@@ -923,7 +1012,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   return (
     <main className="admin-shell">
       <aside className="admin-sidebar">
-        <div className="admin-brand"><Cloud size={24} /><strong>主机管理系统</strong></div>
+        <button className="admin-brand" onClick={() => navigate('/')} title="返回网站首页"><Cloud size={24} /><strong>主机管理系统</strong></button>
         {[
           ['dashboard', LayoutDashboard, '控制台'],
           ['servers', Server, '服务器管理'],
@@ -946,6 +1035,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
                 <span>{admin.role || 'administrator'}</span>
                 <button onClick={() => { setSection('logs'); setAdminMenuOpen(false); }}>系统设置</button>
                 <button onClick={() => { setSection('tickets'); setAdminMenuOpen(false); }}>工单处理</button>
+                <button onClick={() => { setPasswordForm({ open: true, currentPassword: '', newPassword: '', confirmPassword: '' }); setAdminMenuOpen(false); }}>修改密码</button>
                 <button onClick={logout}>退出登录</button>
               </div>
             )}
@@ -1002,6 +1092,16 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
               <label>状态<select value={serverEditForm.values.status || 'running'} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: event.target.value } }))}><option value="running">running</option><option value="suspended">suspended</option><option value="expired">expired</option><option value="expiring">expiring</option></select></label>
               <label>到期时间<input type="date" value={serverEditForm.values.expiresAt || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, expiresAt: event.target.value } }))} /></label>
               <button className="primary" type="submit">保存服务器</button>
+            </form>
+          </Modal>
+        )}
+        {passwordForm.open && (
+          <Modal title="修改管理员密码" onClose={() => setPasswordForm({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' })}>
+            <form className="modal-form" onSubmit={submitAdminPassword}>
+              <label htmlFor="admin-current-password">当前密码<input id="admin-current-password" name="currentPassword" type="password" autoComplete="current-password" value={passwordForm.currentPassword} onChange={(event) => setPasswordForm((prev) => ({ ...prev, currentPassword: event.target.value }))} required /></label>
+              <label htmlFor="admin-new-password">新密码<input id="admin-new-password" name="newPassword" type="password" autoComplete="new-password" minLength="6" value={passwordForm.newPassword} onChange={(event) => setPasswordForm((prev) => ({ ...prev, newPassword: event.target.value }))} required /></label>
+              <label htmlFor="admin-confirm-password">确认新密码<input id="admin-confirm-password" name="confirmPassword" type="password" autoComplete="new-password" minLength="6" value={passwordForm.confirmPassword} onChange={(event) => setPasswordForm((prev) => ({ ...prev, confirmPassword: event.target.value }))} required /></label>
+              <button className="primary" type="submit">保存新密码</button>
             </form>
           </Modal>
         )}
@@ -1102,10 +1202,10 @@ function AdminOrders({ orders, keyword, markPaid, orderAction }) {
         order.orderNo,
         order.user?.username,
         order.product?.name || '-',
-        order.type,
+        orderTypeLabels[order.type] || order.type,
         formatMoney(order.amount),
-        order.payStatus,
-        order.provisionStatus,
+        <StatusPill value={order.payStatus} labels={payStatusLabels} />,
+        <StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />,
         <ActionGroup actions={[
           ...(order.payStatus === 'unpaid' ? [['确认支付', () => markPaid(order.id)], ['取消', () => orderAction(order, 'cancel')]] : []),
           ...(order.payStatus === 'paid' ? [['退款', () => orderAction(order, 'refund')]] : [])
@@ -1231,6 +1331,10 @@ function ActionGroup({ actions }) {
   return <div className="action-group">{activeActions.map(([label, onClick]) => <button className="table-action" key={label} onClick={onClick}>{label}</button>)}</div>;
 }
 
+function StatusPill({ value, labels }) {
+  return <span className={`status-pill ${value || 'unknown'}`}>{labels[value] || value || '-'}</span>;
+}
+
 function Metric({ icon, label, value }) {
   return <article className="metric-card"><div>{icon}</div><span>{label}</span><strong>{value}</strong></article>;
 }
@@ -1268,13 +1372,13 @@ function Modal({ title, children, onClose }) {
   );
 }
 
-function PublicFooter({ siteSettings }) {
+function PublicFooter({ siteSettings, navigate }) {
   return (
     <footer className="site-footer">
       <div className="container footer-grid">
         <div><div className="footer-brand"><Cloud size={26} />{siteSettings.site_name}</div><p>專業互聯網基礎服務提供商，香港伺服器、美國伺服器及 VPS 服務商。</p></div>
         <div><h3>產品中心</h3><a>雲伺服器</a><a>伺服器租用</a><a>伺服器託管</a></div>
-        <div><h3>服務支援</h3><a>服務條款</a><a>私隱政策</a><a>提交工單</a></div>
+        <div><h3>服務支援</h3><a>服務條款</a><a>私隱政策</a><button className="footer-link" onClick={() => navigate('/client?tickets')}>提交工單</button></div>
         <div><h3>聯絡我們</h3><p>中國·香港</p><p>{siteSettings.support_phone}</p><p>{siteSettings.support_email}</p></div>
       </div>
       <div className="copyright">{siteSettings.copyright}</div>

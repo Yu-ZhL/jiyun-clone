@@ -315,6 +315,19 @@ export function createApp() {
     ok(res);
   });
 
+  app.post('/api/admin/auth/change-password', requireAdmin, asyncRoute(async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!newPassword || String(newPassword).length < 6) return fail(res, 40031, '新密码至少 6 位');
+    const admin = await prisma.admin.findUnique({ where: { id: req.admin.id } });
+    if (!admin || !(await bcrypt.compare(currentPassword || '', admin.passwordHash))) return fail(res, 40114, '当前密码错误', 401);
+    await prisma.admin.update({
+      where: { id: admin.id },
+      data: { passwordHash: await bcrypt.hash(String(newPassword), 12) }
+    });
+    await logOperation(req, 'change_admin_password', 'admin', admin.id);
+    ok(res, { changed: true });
+  }));
+
   app.get('/api/admin/auth/me', asyncRoute(async (req, res) => {
     const payload = verifyToken(req.cookies[ADMIN_COOKIE]);
     if (!payload || payload.purpose !== 'admin') return ok(res, null);
@@ -339,6 +352,7 @@ export function createApp() {
     if (!product || product.status !== 'on_sale') return fail(res, 40011, '产品不可购买');
     const normalizedCycle = cycle === 'yearly' ? 'yearly' : 'monthly';
     const amount = normalizedCycle === 'yearly' ? product.priceYearly : product.priceMonthly;
+    if (req.user.balance < amount) return fail(res, 40013, '余额不足，请先充值');
     const order = await prisma.order.create({
       data: {
         orderNo: orderNo(),

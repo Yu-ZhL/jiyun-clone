@@ -317,7 +317,7 @@ a {
 
 .hero {
   position: relative;
-  min-height: 720px;
+  min-height: 760px;
   overflow: hidden;
   background: var(--dark);
   color: white;
@@ -328,13 +328,24 @@ a {
   inset: 0;
   background:
     radial-gradient(circle at 72% 34%, rgba(21, 184, 214, 0.24), transparent 34%),
-    linear-gradient(90deg, rgba(6, 13, 26, 0.98), rgba(10, 25, 45, 0.88), rgba(10, 25, 45, 0.5)),
-    url("/assets/homepage-hero.png") center / cover;
+    linear-gradient(90deg, rgba(5, 12, 24, 0.98), rgba(8, 21, 39, 0.86), rgba(8, 21, 39, 0.44)),
+    var(--hero-image) center / cover;
+  animation: heroMediaIn 900ms ease both;
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 190px;
+  background: linear-gradient(180deg, transparent, rgba(7, 19, 36, 0.88));
+  pointer-events: none;
 }
 
 .hero-content {
   position: relative;
-  min-height: 720px;
+  z-index: 1;
+  min-height: 760px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -345,6 +356,7 @@ a {
 .hero-copy {
   width: min(620px, 100%);
   padding-top: 30px;
+  animation: heroCopyIn 620ms ease both;
 }
 
 .eyebrow {
@@ -399,6 +411,33 @@ a {
   background: var(--cyan);
 }
 
+.hero-arrows {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.hero-arrows button,
+.testimonial-controls button {
+  width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  color: white;
+  backdrop-filter: blur(10px);
+  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+}
+
+.hero-arrows button:hover,
+.testimonial-controls button:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.48);
+  background: rgba(255, 255, 255, 0.18);
+}
+
 .hero-panel {
   width: min(430px, 100%);
   margin: -28px auto 0;
@@ -431,16 +470,28 @@ a {
 .hero-showcase {
   width: min(520px, 42vw);
   align-self: end;
+  animation: showcaseIn 780ms ease both, floatPanel 7s ease-in-out 900ms infinite;
 }
 
 .hero-showcase img {
   display: block;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 10;
   object-fit: cover;
   border: 1px solid rgba(255, 255, 255, 0.22);
   border-radius: 8px;
   box-shadow: 0 36px 100px rgba(0, 0, 0, 0.42);
+}
+
+.hero-showcase::after {
+  content: "";
+  display: block;
+  width: 76%;
+  height: 18px;
+  margin: 18px auto 0;
+  border-radius: 999px;
+  background: rgba(20, 184, 214, 0.28);
+  filter: blur(18px);
 }
 
 .proof-rail {
@@ -522,6 +573,14 @@ a {
 
 .feature-card {
   padding: 34px 28px;
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
+}
+
+.feature-card:hover,
+.price-card:hover {
+  transform: translateY(-6px);
+  border-color: rgba(29, 114, 243, 0.28);
+  box-shadow: 0 24px 56px rgba(30, 58, 94, 0.13);
 }
 
 .feature-icon {
@@ -575,6 +634,7 @@ a {
   padding: 26px;
   position: relative;
   overflow: hidden;
+  transition: transform 220ms ease, box-shadow 220ms ease, border-color 220ms ease;
 }
 
 .price-card.featured {
@@ -690,39 +750,84 @@ a {
 }
 
 .testimonial-band {
-  padding: 88px 0;
-  background: #101927;
+  padding: 104px 0;
+  background:
+    radial-gradient(circle at 18% 0%, rgba(21, 184, 214, 0.2), transparent 32%),
+    linear-gradient(135deg, #081422, #101927 52%, #07101c);
   color: white;
+  overflow: hidden;
 }
 
 .testimonial-band .section-title h2 {
   color: white;
 }
 
+.testimonial-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: 24px;
+  margin-bottom: 34px;
+}
+
+.testimonial-head .section-title {
+  margin: 0;
+  text-align: left;
+}
+
+.testimonial-controls {
+  display: flex;
+  gap: 10px;
+}
+
+.testimonial-window {
+  overflow: hidden;
+}
+
 .testimonial-track {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 22px;
+  gap: 24px;
+  animation: testimonialIn 520ms ease both;
 }
 
 .testimonial-track article {
-  min-height: 230px;
+  min-height: 300px;
   display: grid;
   align-content: space-between;
-  padding: 28px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  gap: 22px;
+  padding: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.045));
+  box-shadow: 0 28px 76px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(14px);
+}
+
+.testimonial-track article span {
+  width: fit-content;
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid rgba(21, 184, 214, 0.32);
+  border-radius: 999px;
+  color: #84e9ff;
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .testimonial-track p {
   margin: 0;
   color: #dbe7f5;
-  line-height: 1.8;
+  font-size: 19px;
+  line-height: 1.85;
 }
 
 .testimonial-track strong {
   color: white;
+  font-size: 18px;
 }
 
 .service-grid {
@@ -755,7 +860,7 @@ a {
 .product-hero {
   background:
     linear-gradient(90deg, rgba(13, 32, 58, 0.95), rgba(16, 62, 111, 0.66)),
-    url("/assets/homepage-hero.png") center / cover;
+    url("/assets/homepage-slide-2.png") center / cover;
 }
 
 .buy-layout {
@@ -1067,6 +1172,36 @@ th {
   background: #e6f8f0;
 }
 
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #41506a;
+  background: #eef2f7;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.status-pill.paid,
+.status-pill.opened {
+  color: #087346;
+  background: #e6f8f0;
+}
+
+.status-pill.unpaid,
+.status-pill.pending {
+  color: #8a5a05;
+  background: #fff4d8;
+}
+
+.status-pill.cancelled,
+.status-pill.refunded {
+  color: #8f2430;
+  background: #ffe8ec;
+}
+
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1363,7 +1498,7 @@ th {
   padding: 56px min(8vw, 110px);
   background:
     linear-gradient(90deg, rgba(5, 12, 24, 0.98), rgba(9, 24, 44, 0.82)),
-    url("/assets/homepage-hero.png") center / cover;
+    url("/assets/homepage-slide-3.png") center / cover;
 }
 
 .admin-login-visual {
@@ -1498,12 +1633,90 @@ th {
   color: #b9c8da;
 }
 
+.footer-link {
+  display: block;
+  margin: 9px 0;
+  padding: 0;
+  background: transparent;
+  color: #b9c8da;
+  text-align: left;
+}
+
+.footer-link:hover {
+  color: white;
+}
+
 .copyright {
   margin-top: 42px;
   padding: 18px;
   border-top: 1px solid rgba(255, 255, 255, 0.12);
   text-align: center;
   color: #9eb1c8;
+}
+
+@keyframes heroMediaIn {
+  from {
+    opacity: 0;
+    transform: scale(1.04);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes heroCopyIn {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes showcaseIn {
+  from {
+    opacity: 0;
+    transform: translateX(28px) translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) translateY(0);
+  }
+}
+
+@keyframes floatPanel {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes testimonialIn {
+  from {
+    opacity: 0;
+    transform: translateX(34px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.001ms !important;
+  }
 }
 
 @media (max-width: 980px) {
@@ -1560,6 +1773,11 @@ th {
 
   .hero-showcase {
     width: 100%;
+  }
+
+  .testimonial-head {
+    align-items: start;
+    flex-direction: column;
   }
 
   .proof-grid,
@@ -1650,6 +1868,10 @@ th {
   .product-form,
   .settings-grid {
     grid-template-columns: 1fr;
+  }
+
+  .testimonial-track article {
+    min-height: 260px;
   }
 
   .server-row {

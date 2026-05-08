@@ -58,8 +58,29 @@ if ($me.username -ne $username) { throw 'auth me mismatch' }
 $admin = Call-Api POST '/api/admin/auth/login' @{ username = 'admin'; password = '123456' } $adminSession
 $adminMe = Call-Api GET '/api/admin/auth/me' $null $adminSession
 if ($adminMe.username -ne 'admin') { throw 'admin me mismatch' }
+try {
+  Call-Api POST '/api/admin/auth/change-password' @{ currentPassword = '123456'; newPassword = 'TempPassw0rd!' } $adminSession | Out-Null
+  Call-Api POST '/api/admin/auth/logout' $null $adminSession | Out-Null
+  $adminSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  Call-Api POST '/api/admin/auth/login' @{ username = 'admin'; password = 'TempPassw0rd!' } $adminSession | Out-Null
+  Call-Api POST '/api/admin/auth/change-password' @{ currentPassword = 'TempPassw0rd!'; newPassword = '123456' } $adminSession | Out-Null
+  Call-Api POST '/api/admin/auth/logout' $null $adminSession | Out-Null
+  $adminSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+  Call-Api POST '/api/admin/auth/login' @{ username = 'admin'; password = '123456' } $adminSession | Out-Null
+} catch {
+  try {
+    $revertSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    Call-Api POST '/api/admin/auth/login' @{ username = 'admin'; password = 'TempPassw0rd!' } $revertSession | Out-Null
+    Call-Api POST '/api/admin/auth/change-password' @{ currentPassword = 'TempPassw0rd!'; newPassword = '123456' } $revertSession | Out-Null
+  } catch {}
+  throw
+}
 $dashboard = Call-Api GET '/api/admin/dashboard/summary' $null $adminSession
 if (@($dashboard.daily).Count -ne 7) { throw 'dashboard daily metrics missing' }
+$staleProducts = Call-Api GET '/api/admin/products' $null $adminSession
+foreach ($staleProduct in ($staleProducts | Where-Object { $_.name -like 'Acceptance VPS*' -and $_.status -eq 'on_sale' })) {
+  Call-Api POST "/api/admin/products/$($staleProduct.id)/off-sale" $null $adminSession | Out-Null
+}
 
 $newProduct = Call-Api POST '/api/admin/products' @{ name = "Acceptance VPS $suffix"; priceMonthly = 66; priceYearly = 660; stock = 5 } $adminSession
 $updatedProduct = Call-Api PUT "/api/admin/products/$($newProduct.id)" @{ name = "Acceptance VPS Updated $suffix"; priceMonthly = 77; priceYearly = 770; stock = 6; cpu = '4 vCPU'; memory = '8 GB'; disk = '120 GB SSD'; bandwidth = '20M CN2'; defense = '30G DDoS' } $adminSession
@@ -73,7 +94,14 @@ if (-not ($products | Where-Object { $_.id -eq $newProduct.id })) {
   throw 'new product not visible publicly'
 }
 
-$order = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession
+$insufficientOrderBlocked = $false
+try {
+  Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession | Out-Null
+} catch {
+  if ($_.Exception.Message -match '40013') { $insufficientOrderBlocked = $true } else { throw }
+}
+if (-not $insufficientOrderBlocked) { throw 'insufficient balance order was created' }
+
 $users = Call-Api GET '/api/admin/users' $null $adminSession
 $createdUser = $users | Where-Object { $_.username -eq $username } | Select-Object -First 1
 if (-not $createdUser) { throw 'registered user not in admin users' }
@@ -83,6 +111,7 @@ Call-Api POST "/api/admin/users/$($createdUser.id)/disable" $null $adminSession 
 Call-Api POST "/api/admin/users/$($createdUser.id)/enable" $null $adminSession | Out-Null
 
 Call-Api POST "/api/admin/users/$($createdUser.id)/adjust-balance" @{ amount = 1000; remark = 'acceptance recharge' } $adminSession | Out-Null
+$order = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession
 $cancelOrder = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession
 $cancelled = Call-Api POST "/api/admin/orders/$($cancelOrder.id)/cancel" $null $adminSession
 if ($cancelled.payStatus -ne 'cancelled') { throw 'admin order cancel failed' }
