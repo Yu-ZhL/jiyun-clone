@@ -677,6 +677,13 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
     if (query.has('tickets')) setSection('tickets');
     else if (query.get('section')) setSection(query.get('section'));
   }, [route]);
+  useEffect(() => { load().catch((error) => setNotice(error.message)); }, [section]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load().catch(() => {});
+    }, 15000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const pay = async (orderId) => {
     try {
@@ -723,7 +730,13 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
         <button onClick={logout}>退出登录</button>
       </aside>
       <section className="client-content">
-        <div className="dashboard-head"><div><span className="eyebrow">Client Console</span><h1>{hk.consoleTitle}</h1></div><button className="primary" onClick={() => navigate('/buy')}><Plus size={18} />購買伺服器</button></div>
+        <div className="dashboard-head">
+          <div><span className="eyebrow">Client Console</span><h1>{hk.consoleTitle}</h1></div>
+          <div className="dashboard-actions">
+            <button className="table-action" onClick={() => load().catch((error) => setNotice(error.message))}>刷新</button>
+            <button className="primary" onClick={() => navigate('/buy')}><Plus size={18} />購買伺服器</button>
+          </div>
+        </div>
         {section === 'overview' && (
           <>
             <div className="metric-grid">
@@ -734,7 +747,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
             </div>
             <div className="two-col">
               <Panel title="最近订单"><Rows rows={data.orders.slice(0, 6).map((order) => ({ left: order.orderNo, mid: formatMoney(order.amount), right: payStatusLabels[order.payStatus] || order.payStatus, action: order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : null }))} /></Panel>
-              <Panel title="最近通知"><Rows rows={data.notifications.slice(0, 6).map((item) => ({ left: item.title, mid: formatDate(item.createdAt), right: item.readAt ? '已读' : '未读' }))} /></Panel>
+              <Panel title="最近通知"><Rows rows={data.notifications.slice(0, 6).map((item) => ({ left: item.title, mid: item.content, right: item.readAt ? '已读' : '未读' }))} /></Panel>
             </div>
           </>
         )}
@@ -755,7 +768,13 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
           </div>
         )}
         {section === 'wallet' && <Panel title="余额流水"><Rows rows={data.wallet.map((item) => ({ left: item.remark || item.type, mid: formatMoney(item.amount), right: formatMoney(item.balanceAfter) }))} /></Panel>}
-        {section === 'notifications' && <Panel title="站内通知"><Rows rows={data.notifications.map((item) => ({ left: item.title, mid: item.content, right: item.readAt ? '已读' : '未读' }))} /></Panel>}
+        {section === 'notifications' && <Panel title="站内通知"><DataTable columns={['通知', '关联订单', '内容', '时间', '状态']} rows={data.notifications.map((item) => [
+          <NotificationTitle item={item} />,
+          item.order?.orderNo || '-',
+          <div className="message-preview notification-content"><span>{item.content}</span></div>,
+          formatDate(item.createdAt),
+          item.readAt ? '已读' : '未读'
+        ])} /></Panel>}
       </section>
     </main>
   );
@@ -1472,6 +1491,15 @@ function OrderProductCell({ order }) {
           {messages.length > visibleMessages.length && <em className="message-more">+{messages.length - visibleMessages.length}</em>}
         </div>
       ) : <small>暂无订单消息</small>}
+    </div>
+  );
+}
+
+function NotificationTitle({ item }) {
+  return (
+    <div className="meta-stack">
+      <strong>{item.title}</strong>
+      <small>{item.type === 'order_message' ? '订单消息' : item.type === 'server_opened' ? '开通通知' : item.type === 'ticket_reply' ? '工单回复' : item.type}</small>
     </div>
   );
 }

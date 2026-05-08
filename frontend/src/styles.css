@@ -1158,6 +1158,14 @@ a {
   background: #edf5ff;
 }
 
+.dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .responsive-table {
   overflow: auto;
 }
@@ -1379,6 +1387,10 @@ th {
   max-width: 360px;
   color: #38445a;
   background: #f4f7fb;
+}
+
+.notification-content {
+  max-width: 520px;
 }
 
 .two-col {
