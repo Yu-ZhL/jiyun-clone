@@ -126,6 +126,7 @@ async function completePaidOrder(tx, order) {
     await tx.notification.create({
       data: {
         userId: order.userId,
+        relatedOrderId: order.id,
         type: 'renewal_paid',
         title: '服务器续费成功',
         content: `${server.name} 已续费至 ${newExpiresAt.toISOString().slice(0, 10)}`
@@ -387,7 +388,15 @@ export function createApp() {
   }));
 
   app.get('/api/client/orders', requireUser, asyncRoute(async (req, res) => {
-    ok(res, await prisma.order.findMany({ where: { userId: req.user.id }, include: { product: true, server: true }, orderBy: { createdAt: 'desc' } }));
+    ok(res, await prisma.order.findMany({
+      where: { userId: req.user.id },
+      include: {
+        product: true,
+        server: true,
+        notifications: { orderBy: { createdAt: 'desc' } }
+      },
+      orderBy: { createdAt: 'desc' }
+    }));
   }));
 
   app.get('/api/client/servers', requireUser, asyncRoute(async (req, res) => {
@@ -427,7 +436,7 @@ export function createApp() {
   }));
 
   app.get('/api/client/notifications', requireUser, asyncRoute(async (req, res) => {
-    ok(res, await prisma.notification.findMany({ where: { userId: req.user.id }, orderBy: { createdAt: 'desc' } }));
+    ok(res, await prisma.notification.findMany({ where: { userId: req.user.id }, include: { order: true }, orderBy: { createdAt: 'desc' } }));
   }));
 
   app.post('/api/client/notifications/:id/read', requireUser, asyncRoute(async (req, res) => {
@@ -519,7 +528,10 @@ export function createApp() {
   }));
 
   app.get('/api/admin/users', requireAdmin, asyncRoute(async (_req, res) => {
-    ok(res, await prisma.user.findMany({ orderBy: { createdAt: 'desc' } }));
+    ok(res, await prisma.user.findMany({
+      include: { _count: { select: { orders: true, servers: true, tickets: true, notifications: true } } },
+      orderBy: { createdAt: 'desc' }
+    }));
   }));
 
   app.get('/api/admin/users/:id', requireAdmin, asyncRoute(async (req, res) => {
@@ -644,13 +656,39 @@ export function createApp() {
   }));
 
   app.get('/api/admin/orders', requireAdmin, asyncRoute(async (_req, res) => {
-    ok(res, await prisma.order.findMany({ include: { user: true, product: true, server: true }, orderBy: { createdAt: 'desc' } }));
+    ok(res, await prisma.order.findMany({
+      include: {
+        user: true,
+        product: true,
+        server: true,
+        notifications: { orderBy: { createdAt: 'desc' } }
+      },
+      orderBy: { createdAt: 'desc' }
+    }));
   }));
 
   app.get('/api/admin/orders/:id', requireAdmin, asyncRoute(async (req, res) => {
-    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { user: true, product: true, server: true, walletLogs: true, renewals: true } });
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { user: true, product: true, server: true, walletLogs: true, renewals: true, notifications: true } });
     if (!order) return fail(res, 40406, '订单不存在', 404);
     ok(res, order);
+  }));
+
+  app.post('/api/admin/orders/:id/message', requireAdmin, asyncRoute(async (req, res) => {
+    const content = String(req.body.content || '').trim();
+    if (!content) return fail(res, 40054, '消息内容必填');
+    const order = await prisma.order.findUnique({ where: { id: req.params.id }, include: { user: true, product: true } });
+    if (!order) return fail(res, 40406, '订单不存在', 404);
+    const notification = await prisma.notification.create({
+      data: {
+        userId: order.userId,
+        relatedOrderId: order.id,
+        type: 'order_message',
+        title: `订单通知：${order.orderNo}`,
+        content
+      }
+    });
+    await logOperation(req, 'send_order_message', 'order', order.id, { notificationId: notification.id });
+    ok(res, notification);
   }));
 
   app.post('/api/admin/orders/:id/mark-paid', requireAdmin, asyncRoute(async (req, res) => {
@@ -748,6 +786,7 @@ export function createApp() {
     await prisma.notification.create({
       data: {
         userId: data.userId,
+        relatedOrderId: order?.id,
         type: 'server_opened',
         title: '服务器已开通',
         content: `${name} 已开通，IP：${ip}`
@@ -819,6 +858,14 @@ export function createApp() {
     if (!req.body.content) return fail(res, 40022, '回复内容必填');
     const reply = await prisma.ticketReply.create({ data: { ticketId: req.params.id, senderType: 'admin', senderId: req.admin.id, content: req.body.content } });
     await prisma.ticket.update({ where: { id: req.params.id }, data: { status: 'replied' } });
+    await prisma.notification.create({
+      data: {
+        userId: ticket.userId,
+        type: 'ticket_reply',
+        title: `工单回复：${ticket.title}`,
+        content: req.body.content
+      }
+    });
     await logOperation(req, 'reply_ticket', 'ticket', req.params.id);
     ok(res, reply);
   }));

@@ -258,10 +258,36 @@ a {
   color: var(--primary);
 }
 
-.nav-actions {
+.header-actions {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.signed-in-user {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: #273247;
+  background: #f8fbff;
+}
+
+.signed-in-user small {
+  color: var(--muted);
+}
+
+.signed-in-user strong {
+  font-size: 14px;
+}
+
+.logout-btn {
+  border-color: var(--line);
+  color: #38445a;
+  background: white;
 }
 
 .primary,
@@ -1144,11 +1170,12 @@ table {
 
 th,
 td {
-  height: 48px;
-  padding: 0 12px;
+  height: 56px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
   text-align: left;
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 th {
@@ -1200,6 +1227,158 @@ th {
 .status-pill.refunded {
   color: #8f2430;
   background: #ffe8ec;
+}
+
+.status-pill.active,
+.status-pill.on_sale,
+.status-pill.running {
+  color: #087346;
+  background: #e6f8f0;
+}
+
+.status-pill.disabled,
+.status-pill.off_sale,
+.status-pill.suspended,
+.status-pill.expired,
+.status-pill.deleted,
+.status-pill.closed {
+  color: #596274;
+  background: #e9edf3;
+}
+
+.status-pill.open,
+.status-pill.replied,
+.status-pill.expiring {
+  color: #1457b7;
+  background: #e6f0ff;
+}
+
+.identity-cell,
+.meta-stack,
+.order-product-cell,
+.message-preview,
+.compact-stats {
+  white-space: normal;
+}
+
+.identity-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 150px;
+}
+
+.identity-cell.compact {
+  min-width: 120px;
+}
+
+.identity-avatar {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: linear-gradient(135deg, #1d72f3, #12bde6);
+  color: white;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.identity-cell span:last-child,
+.meta-stack,
+.order-product-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.identity-cell strong,
+.meta-stack strong,
+.order-product-cell strong {
+  color: var(--text);
+}
+
+.identity-cell small,
+.meta-stack small,
+.order-product-cell small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.money-cell {
+  color: #0e7c54;
+}
+
+.compact-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(70px, 1fr));
+  gap: 6px;
+  min-width: 170px;
+}
+
+.compact-stats span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: #f4f7fb;
+  color: #5c6678;
+  font-size: 12px;
+}
+
+.compact-stats strong {
+  color: var(--text);
+}
+
+.order-product-cell {
+  min-width: 230px;
+}
+
+.message-list {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.message-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 320px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  color: #315072;
+  background: #eef6ff;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.message-preview span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.message-preview em {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-style: normal;
+}
+
+.message-more {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.ticket-preview {
+  display: grid;
+  justify-items: start;
+  max-width: 360px;
+  color: #38445a;
+  background: #f4f7fb;
 }
 
 .two-col {
@@ -1747,7 +1926,7 @@ th {
   }
 
   .text-btn,
-  .nav-actions .small {
+  .header-actions .small {
     display: none;
   }
 

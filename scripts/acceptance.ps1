@@ -125,6 +125,15 @@ if ($refunded.payStatus -ne 'refunded') { throw 'admin order refund failed' }
 $paid = Call-Api POST "/api/orders/$($order.id)/pay-with-balance" $null $userSession
 if ($paid.payStatus -ne 'paid') { throw 'balance payment failed' }
 
+$orderMessageText = "Acceptance order message $suffix"
+$orderMessage = Call-Api POST "/api/admin/orders/$($order.id)/message" @{ content = $orderMessageText } $adminSession
+if ($orderMessage.relatedOrderId -ne $order.id) { throw 'order message not related to order' }
+$clientOrdersWithMessages = Call-Api GET '/api/client/orders' $null $userSession
+$clientOrderWithMessage = $clientOrdersWithMessages | Where-Object { $_.id -eq $order.id } | Select-Object -First 1
+if (-not ($clientOrderWithMessage.notifications | Where-Object { $_.content -eq $orderMessageText })) {
+  throw 'client order message not visible on order'
+}
+
 $orders = Call-Api GET '/api/admin/orders' $null $adminSession
 $paidOrder = $orders | Where-Object { $_.id -eq $order.id } | Select-Object -First 1
 if ($paidOrder.payStatus -ne 'paid') { throw 'admin order status not paid' }
@@ -168,6 +177,10 @@ if ([DateTime]$serverAfterManualRenew.expiresAt -le [DateTime]$serverBeforeManua
 
 $ticket = Call-Api POST '/api/client/tickets' @{ title = "Acceptance ticket $suffix"; content = 'Please check server.' } $userSession
 Call-Api POST "/api/admin/tickets/$($ticket.id)/replies" @{ content = 'Acceptance reply.' } $adminSession | Out-Null
+$clientNotifications = Call-Api GET '/api/client/notifications' $null $userSession
+if (-not ($clientNotifications | Where-Object { $_.type -eq 'ticket_reply' -and $_.content -eq 'Acceptance reply.' })) {
+  throw 'ticket reply notification missing'
+}
 $closedTicket = Call-Api POST "/api/admin/tickets/$($ticket.id)/close" $null $adminSession
 if ($closedTicket.status -ne 'closed') { throw 'admin ticket close failed' }
 

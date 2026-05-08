@@ -15,7 +15,9 @@ import {
   LayoutDashboard,
   LockKeyhole,
   LogIn,
+  LogOut,
   Menu,
+  MessageSquare,
   PackagePlus,
   Plus,
   ReceiptText,
@@ -120,6 +122,31 @@ const provisionStatusLabels = {
   none: '无需开通',
   pending: '待开通',
   opened: '已开通'
+};
+
+const ticketStatusLabels = {
+  open: '待处理',
+  replied: '已回复',
+  closed: '已关闭'
+};
+
+const userStatusLabels = {
+  active: '正常',
+  disabled: '已禁用'
+};
+
+const productStatusLabels = {
+  on_sale: '上架中',
+  off_sale: '已下架'
+};
+
+const serverStatusLabels = {
+  pending: '待开通',
+  running: '运行中',
+  suspended: '已暂停',
+  expired: '已到期',
+  expiring: '即将到期',
+  deleted: '已删除'
 };
 
 function textIncludes(value, keyword) {
@@ -238,13 +265,23 @@ function App() {
   );
 }
 
-function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, siteSettings }) {
+function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, siteSettings, refreshUser, setNotice }) {
   const nav = [
     { label: hk.navHome, path: '/' },
     { label: hk.navProducts, path: '/products' },
     { label: hk.navBuy, path: '/buy' },
     { label: hk.navConsole, path: '/client' }
   ];
+  const logout = async () => {
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+      await refreshUser();
+      setNotice('已退出登录');
+      navigate('/');
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
   return (
     <header className="site-header">
       <div className="topbar">
@@ -267,9 +304,19 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, site
             </button>
           ))}
         </nav>
-        <div className="nav-actions">
-          <button className="text-btn" onClick={() => navigate(user ? '/client' : '/client?auth=login')}><LogIn size={16} />{user ? user.username : hk.login}</button>
-          <button className="primary small" onClick={() => navigate(user ? '/buy' : '/client?auth=register')}>{user ? hk.primaryCta : hk.register}</button>
+        <div className="header-actions">
+          {user ? (
+            <>
+              <span className="signed-in-user"><User size={15} /><small>已登录</small><strong>{user.username}</strong></span>
+              <button className="text-btn" onClick={() => navigate('/client')}>客户中心</button>
+              <button className="secondary small logout-btn" onClick={logout}><LogOut size={15} />退出</button>
+            </>
+          ) : (
+            <>
+              <button className="text-btn" onClick={() => navigate('/client?auth=login')}><LogIn size={16} />{hk.login}</button>
+              <button className="primary small" onClick={() => navigate('/client?auth=register')}>{hk.register}</button>
+            </>
+          )}
           <button className="icon-btn mobile-only" aria-label="menu" onClick={() => setMobileNav((value) => !value)}>
             {mobileNav ? <X size={20} /> : <Menu size={20} />}
           </button>
@@ -691,12 +738,20 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
             </div>
           </>
         )}
-        {section === 'servers' && <Panel title="我的服务器"><DataTable columns={['名称', 'IP', '系统', '登录', '到期时间', '状态', '操作']} rows={data.servers.map((server) => [server.name, server.ip, server.os, `${server.loginUser} / ${server.loginPassword}`, formatDate(server.expiresAt), server.status, <button className="table-action" onClick={() => renew(server.id)}>续费</button>])} /></Panel>}
-        {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单号', '产品', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [order.orderNo, order.product?.name || '-', orderTypeLabels[order.type] || order.type, formatMoney(order.amount), <StatusPill value={order.payStatus} labels={payStatusLabels} />, <StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />, order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : '-'])} /></Panel>}
+        {section === 'servers' && <Panel title="我的服务器"><DataTable columns={['名称', 'IP', '系统', '登录', '到期时间', '状态', '操作']} rows={data.servers.map((server) => [server.name, server.ip, server.os, `${server.loginUser} / ${server.loginPassword}`, formatDate(server.expiresAt), <StatusPill value={server.status} labels={serverStatusLabels} />, <button className="table-action" onClick={() => renew(server.id)}>续费</button>])} /></Panel>}
+        {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单', '产品与消息', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [
+          <OrderNumberCell order={order} />,
+          <OrderProductCell order={order} />,
+          orderTypeLabels[order.type] || order.type,
+          formatMoney(order.amount),
+          <StatusPill value={order.payStatus} labels={payStatusLabels} />,
+          <StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />,
+          order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : '-'
+        ])} /></Panel>}
         {section === 'tickets' && (
           <div className="two-col">
             <Panel title="提交工单"><form className="admin-form ticket-form" onSubmit={submitTicket}><input placeholder="标题" value={ticket.title} onChange={(event) => setTicket((prev) => ({ ...prev, title: event.target.value }))} required /><input placeholder="内容" value={ticket.content} onChange={(event) => setTicket((prev) => ({ ...prev, content: event.target.value }))} required /><button className="primary" type="submit">提交</button></form></Panel>
-            <Panel title="工单列表"><Rows rows={data.tickets.map((item) => ({ left: item.title, mid: formatDate(item.updatedAt), right: item.status }))} /></Panel>
+            <Panel title="工单列表"><Rows rows={data.tickets.map((item) => ({ left: item.title, mid: formatDate(item.updatedAt), right: <StatusPill value={item.status} labels={ticketStatusLabels} /> }))} /></Panel>
           </div>
         )}
         {section === 'wallet' && <Panel title="余额流水"><Rows rows={data.wallet.map((item) => ({ left: item.remark || item.type, mid: formatMoney(item.amount), right: formatMoney(item.balanceAfter) }))} /></Panel>}
@@ -752,6 +807,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   const [productEditForm, setProductEditForm] = useState({ open: false, product: null, values: emptyProductForm });
   const [serverEditForm, setServerEditForm] = useState({ open: false, server: null, values: {} });
   const [passwordForm, setPasswordForm] = useState({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [orderMessageForm, setOrderMessageForm] = useState({ open: false, order: null, content: '' });
   const [settingsForm, setSettingsForm] = useState({});
 
   const load = async () => {
@@ -910,6 +966,34 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
     }
   };
 
+  const openProvisionFromOrder = (order) => {
+    setServerForm((prev) => ({
+      ...prev,
+      orderId: order.id,
+      name: order.product?.name || order.orderNo,
+      os: prev.os || 'Linux',
+      loginUser: prev.loginUser || 'root'
+    }));
+    setSection('servers');
+    setNotice(`已选择待开通订单 ${order.orderNo}，请补充 IP 和密码后开通`);
+  };
+
+  const submitOrderMessage = async (event) => {
+    event.preventDefault();
+    if (!orderMessageForm.order) return;
+    try {
+      await api(`/api/admin/orders/${orderMessageForm.order.id}/message`, {
+        method: 'POST',
+        body: { content: orderMessageForm.content }
+      });
+      setOrderMessageForm({ open: false, order: null, content: '' });
+      setNotice('订单消息已发送给用户');
+      await load();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
   const openServer = async (event) => {
     event.preventDefault();
     try {
@@ -1043,7 +1127,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
         </div>
         {section === 'dashboard' && <AdminSummary summary={data.summary} runJobs={runJobs} />}
         {section === 'products' && <AdminProducts products={data.products} keyword={adminFilter} form={productForm} setForm={setProductForm} addProduct={addProduct} updateProductStatus={updateProductStatus} openProductEdit={openProductEdit} />}
-        {section === 'orders' && <AdminOrders orders={data.orders} keyword={adminFilter} markPaid={markPaid} orderAction={orderAction} />}
+        {section === 'orders' && <AdminOrders orders={data.orders} keyword={adminFilter} markPaid={markPaid} orderAction={orderAction} openOrderMessage={(order) => setOrderMessageForm({ open: true, order, content: '' })} openProvision={openProvisionFromOrder} />}
         {section === 'servers' && <AdminServers servers={data.servers} keyword={adminFilter} orders={pendingPaidOrders} form={serverForm} setForm={setServerForm} openServer={openServer} openServerEdit={openServerEdit} serverAction={serverAction} />}
         {section === 'users' && <AdminUsers users={data.users} keyword={adminFilter} openUserEdit={openUserEdit} openRecharge={(user) => setRechargeForm({ open: true, user, amount: '', remark: '后台手动充值' })} setUserStatus={setUserStatus} impersonate={impersonate} />}
         {section === 'tickets' && <AdminTickets tickets={data.tickets} keyword={adminFilter} openReply={(ticket) => setReplyForm({ open: true, ticket, content: '' })} closeTicket={closeTicket} />}
@@ -1070,7 +1154,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
             <form className="modal-form" onSubmit={submitUserEdit}>
               <label>邮箱<input value={userForm.email} onChange={(event) => setUserForm((prev) => ({ ...prev, email: event.target.value }))} required /></label>
               <label>电话<input value={userForm.phone} onChange={(event) => setUserForm((prev) => ({ ...prev, phone: event.target.value }))} /></label>
-              <label>状态<select value={userForm.status} onChange={(event) => setUserForm((prev) => ({ ...prev, status: event.target.value }))}><option value="active">active</option><option value="disabled">disabled</option></select></label>
+              <label>状态<select value={userForm.status} onChange={(event) => setUserForm((prev) => ({ ...prev, status: event.target.value }))}><option value="active">正常</option><option value="disabled">已禁用</option></select></label>
               <button className="primary" type="submit">保存用户</button>
             </form>
           </Modal>
@@ -1089,9 +1173,19 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
               <label>登录用户<input value={serverEditForm.values.loginUser || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginUser: event.target.value } }))} /></label>
               <label>新密码<input type="password" value={serverEditForm.values.loginPassword || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginPassword: event.target.value } }))} placeholder="不填写则不修改" /></label>
               <label>面板地址<input value={serverEditForm.values.panelUrl || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, panelUrl: event.target.value } }))} /></label>
-              <label>状态<select value={serverEditForm.values.status || 'running'} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: event.target.value } }))}><option value="running">running</option><option value="suspended">suspended</option><option value="expired">expired</option><option value="expiring">expiring</option></select></label>
+              <label>状态<select value={serverEditForm.values.status || 'running'} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: event.target.value } }))}><option value="running">运行中</option><option value="suspended">已暂停</option><option value="expired">已到期</option><option value="expiring">即将到期</option></select></label>
               <label>到期时间<input type="date" value={serverEditForm.values.expiresAt || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, expiresAt: event.target.value } }))} /></label>
               <button className="primary" type="submit">保存服务器</button>
+            </form>
+          </Modal>
+        )}
+        {orderMessageForm.open && (
+          <Modal title={`发送订单消息：${orderMessageForm.order.orderNo}`} onClose={() => setOrderMessageForm({ open: false, order: null, content: '' })}>
+            <form className="modal-form" onSubmit={submitOrderMessage}>
+              <label>用户<input value={orderMessageForm.order.user?.username || '-'} readOnly /></label>
+              <label>订单<input value={`${orderMessageForm.order.product?.name || '-'} / ${formatMoney(orderMessageForm.order.amount)}`} readOnly /></label>
+              <label>消息内容<textarea value={orderMessageForm.content} onChange={(event) => setOrderMessageForm((prev) => ({ ...prev, content: event.target.value }))} placeholder="例如：您的订单已进入开通队列，预计 10 分钟内交付。" required /></label>
+              <button className="primary" type="submit"><MessageSquare size={17} />发送给用户</button>
             </form>
           </Modal>
         )}
@@ -1183,7 +1277,7 @@ function AdminProducts({ products, keyword, form, setForm, addProduct, updatePro
         formatMoney(product.priceMonthly),
         formatMoney(product.priceYearly),
         product.stock,
-        product.status,
+        <StatusPill value={product.status} labels={productStatusLabels} />,
         <ActionGroup actions={[
           ['编辑', () => openProductEdit(product)],
           [product.status === 'on_sale' ? '下架' : '上架', () => updateProductStatus(product, product.status === 'on_sale' ? 'off_sale' : 'on_sale')]
@@ -1193,20 +1287,22 @@ function AdminProducts({ products, keyword, form, setForm, addProduct, updatePro
   );
 }
 
-function AdminOrders({ orders, keyword, markPaid, orderAction }) {
+function AdminOrders({ orders, keyword, markPaid, orderAction, openOrderMessage, openProvision }) {
   const rows = orders.filter((order) => [order.orderNo, order.user?.username, order.product?.name, order.type, order.payStatus, order.provisionStatus].some((value) => textIncludes(value, keyword)));
   return (
     <div className="admin-page">
       <h1>订单管理</h1>
-      <DataTable columns={['订单号', '用户', '产品', '类型', '金额', '支付', '开通', '操作']} rows={rows.map((order) => [
-        order.orderNo,
-        order.user?.username,
-        order.product?.name || '-',
+      <DataTable columns={['订单', '客户', '产品与消息', '类型', '金额', '支付', '开通', '操作']} rows={rows.map((order) => [
+        <OrderNumberCell order={order} />,
+        <UserIdentity user={order.user} compact />,
+        <OrderProductCell order={order} />,
         orderTypeLabels[order.type] || order.type,
         formatMoney(order.amount),
         <StatusPill value={order.payStatus} labels={payStatusLabels} />,
         <StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />,
         <ActionGroup actions={[
+          ...(order.payStatus === 'paid' && order.provisionStatus === 'pending' && order.type === 'new_server' ? [['开通服务器', () => openProvision(order)]] : []),
+          ['发消息', () => openOrderMessage(order)],
           ...(order.payStatus === 'unpaid' ? [['确认支付', () => markPaid(order.id)], ['取消', () => orderAction(order, 'cancel')]] : []),
           ...(order.payStatus === 'paid' ? [['退款', () => orderAction(order, 'refund')]] : [])
         ]} />
@@ -1241,7 +1337,7 @@ function AdminServers({ servers, keyword, orders, form, setForm, openServer, ope
         server.ip,
         server.os,
         formatDate(server.expiresAt),
-        server.status,
+        <StatusPill value={server.status} labels={serverStatusLabels} />,
         <ActionGroup actions={[
           ['编辑', () => openServerEdit(server)],
           [server.status === 'suspended' ? '恢复' : '暂停', () => serverAction(server, server.status === 'suspended' ? 'resume' : 'suspend')],
@@ -1257,13 +1353,12 @@ function AdminUsers({ users, keyword, openUserEdit, openRecharge, setUserStatus,
   return (
     <div className="admin-page">
       <h1>用户管理</h1>
-      <DataTable columns={['用户', '邮箱', '电话', '余额', '状态', '注册时间', '操作']} rows={rows.map((user) => [
-        user.username,
-        user.email,
-        user.phone || '-',
-        formatMoney(user.balance),
-        user.status,
-        formatDate(user.createdAt),
+      <DataTable columns={['用户信息', '联系方式', '余额', '业务概况', '状态', '操作']} rows={rows.map((user) => [
+        <UserIdentity user={user} />,
+        <div className="meta-stack"><span>{user.email}</span><small>{user.phone || '未填写手机号'}</small><small>注册：{formatDate(user.createdAt)}</small></div>,
+        <strong className="money-cell">{formatMoney(user.balance)}</strong>,
+        <UserBusinessStats user={user} />,
+        <StatusPill value={user.status} labels={userStatusLabels} />,
         <ActionGroup actions={[
           ['编辑', () => openUserEdit(user)],
           ['充值', () => openRecharge(user)],
@@ -1280,12 +1375,12 @@ function AdminTickets({ tickets, keyword, openReply, closeTicket }) {
   return (
     <div className="admin-page">
       <h1>工单管理</h1>
-      <DataTable columns={['标题', '用户', '状态', '更新时间', '最近内容', '操作']} rows={rows.map((ticket) => [
-        ticket.title,
-        ticket.user?.username,
-        ticket.status,
+      <DataTable columns={['工单', '用户', '状态', '更新时间', '最近内容', '操作']} rows={rows.map((ticket) => [
+        <TicketTitleCell ticket={ticket} />,
+        <UserIdentity user={ticket.user} compact />,
+        <StatusPill value={ticket.status} labels={ticketStatusLabels} />,
         formatDate(ticket.updatedAt),
-        ticket.replies?.[ticket.replies.length - 1]?.content || '-',
+        <TicketLastReply ticket={ticket} />,
         <ActionGroup actions={[
           ['回复', () => openReply(ticket)],
           ...(ticket.status !== 'closed' ? [['关闭', () => closeTicket(ticket)]] : [])
@@ -1321,6 +1416,86 @@ function AdminLogs({ logs, keyword, settings, settingsForm, setSettingsForm, sav
         </form>
       </Panel>
       <DataTable columns={['动作', '目标', '管理员', '时间', '详情']} rows={rows.map((log) => [log.action, `${log.targetType}:${log.targetId || '-'}`, log.admin?.username || '-', formatDate(log.createdAt), log.detail || '-'])} />
+    </div>
+  );
+}
+
+function UserIdentity({ user, compact = false }) {
+  if (!user) return '-';
+  return (
+    <div className={`identity-cell ${compact ? 'compact' : ''}`}>
+      <span className="identity-avatar">{user.username?.slice(0, 1).toUpperCase() || 'U'}</span>
+      <span><strong>{user.username}</strong><small>ID {user.id?.slice(-6) || '-'}</small></span>
+    </div>
+  );
+}
+
+function UserBusinessStats({ user }) {
+  const count = user._count || {};
+  return (
+    <div className="compact-stats">
+      <span><strong>{count.orders || 0}</strong> 订单</span>
+      <span><strong>{count.servers || 0}</strong> 服务器</span>
+      <span><strong>{count.tickets || 0}</strong> 工单</span>
+      <span><strong>{count.notifications || 0}</strong> 通知</span>
+    </div>
+  );
+}
+
+function OrderNumberCell({ order }) {
+  return (
+    <div className="meta-stack order-number-cell">
+      <strong>{order.orderNo}</strong>
+      <small>{formatDate(order.createdAt)}</small>
+    </div>
+  );
+}
+
+function OrderProductCell({ order }) {
+  const messages = order.notifications || [];
+  const visibleMessages = [
+    ...messages.filter((item) => item.type === 'order_message'),
+    ...messages.filter((item) => item.type !== 'order_message')
+  ].slice(0, 2);
+  return (
+    <div className="order-product-cell">
+      <strong>{order.product?.name || '-'}</strong>
+      {order.server?.ip && <small>关联服务器：{order.server.ip}</small>}
+      {visibleMessages.length ? (
+        <div className="message-list">
+          {visibleMessages.map((message) => (
+            <div className="message-preview" key={message.id}>
+              <MessageSquare size={14} />
+              <span>{message.content}</span>
+            </div>
+          ))}
+          {messages.length > visibleMessages.length && <em className="message-more">+{messages.length - visibleMessages.length}</em>}
+        </div>
+      ) : <small>暂无订单消息</small>}
+    </div>
+  );
+}
+
+function TicketTitleCell({ ticket }) {
+  return (
+    <div className="meta-stack">
+      <strong>{ticket.title}</strong>
+      <small>分类：{ticket.category || 'support'} · 创建：{formatDate(ticket.createdAt)}</small>
+    </div>
+  );
+}
+
+function latestReply(ticket) {
+  return [...(ticket.replies || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))[0];
+}
+
+function TicketLastReply({ ticket }) {
+  const reply = latestReply(ticket);
+  if (!reply) return '-';
+  return (
+    <div className="message-preview ticket-preview">
+      <span>{reply.content}</span>
+      <em>{reply.senderType === 'admin' ? '后台' : '用户'} · {formatDate(reply.createdAt)}</em>
     </div>
   );
 }

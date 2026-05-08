@@ -8,36 +8,36 @@ datasource db {
 }
 
 model Admin {
-  id           String         @id @default(cuid())
-  username     String         @unique
-  passwordHash String
-  name         String
-  role         String         @default("super_admin")
-  status       String         @default("active")
-  lastLoginAt  DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  walletLogs   WalletTransaction[]
+  id            String              @id @default(cuid())
+  username      String              @unique
+  passwordHash  String
+  name          String
+  role          String              @default("super_admin")
+  status        String              @default("active")
+  lastLoginAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  walletLogs    WalletTransaction[]
   operationLogs OperationLog[]
 }
 
 model User {
-  id           String         @id @default(cuid())
-  username     String         @unique
-  email        String         @unique
-  phone        String?
-  passwordHash String
-  balance      Int            @default(0)
-  status       String         @default("active")
-  registerIp   String?
-  lastLoginAt  DateTime?
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  orders       Order[]
-  servers      Server[]
-  walletLogs   WalletTransaction[]
-  tickets      Ticket[]
-  notifications Notification[]
+  id                  String               @id @default(cuid())
+  username            String               @unique
+  email               String               @unique
+  phone               String?
+  passwordHash        String
+  balance             Int                  @default(0)
+  status              String               @default("active")
+  registerIp          String?
+  lastLoginAt         DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  orders              Order[]
+  servers             Server[]
+  walletLogs          WalletTransaction[]
+  tickets             Ticket[]
+  notifications       Notification[]
   impersonationTokens ImpersonationToken[]
 }
 
@@ -64,8 +64,8 @@ model Product {
 }
 
 model Order {
-  id              String    @id @default(cuid())
-  orderNo         String    @unique
+  id              String              @id @default(cuid())
+  orderNo         String              @unique
   userId          String
   type            String
   productId       String?
@@ -73,19 +73,20 @@ model Order {
   cycle           String?
   amount          Int
   payMethod       String?
-  payStatus       String    @default("unpaid")
-  provisionStatus String    @default("none")
-  remark          String?   @db.Text
-  createdAt       DateTime  @default(now())
+  payStatus       String              @default("unpaid")
+  provisionStatus String              @default("none")
+  remark          String?             @db.Text
+  createdAt       DateTime            @default(now())
   paidAt          DateTime?
   cancelledAt     DateTime?
   openedAt        DateTime?
-  user            User      @relation(fields: [userId], references: [id])
-  product         Product?  @relation(fields: [productId], references: [id])
-  server          Server?   @relation("OrderServer", fields: [serverId], references: [id])
-  openedServer    Server?   @relation("ServerOrder")
+  user            User                @relation(fields: [userId], references: [id])
+  product         Product?            @relation(fields: [productId], references: [id])
+  server          Server?             @relation("OrderServer", fields: [serverId], references: [id])
+  openedServer    Server?             @relation("ServerOrder")
   walletLogs      WalletTransaction[]
   renewals        Renewal[]
+  notifications   Notification[]
 
   @@index([userId])
   @@index([productId])
@@ -177,16 +178,19 @@ model TicketReply {
 }
 
 model Notification {
-  id        String    @id @default(cuid())
-  userId    String
-  title     String
-  content   String    @db.Text
-  type      String
-  readAt    DateTime?
-  createdAt DateTime  @default(now())
-  user      User      @relation(fields: [userId], references: [id])
+  id             String    @id @default(cuid())
+  userId         String
+  relatedOrderId String?
+  title          String
+  content        String    @db.Text
+  type           String
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+  user           User      @relation(fields: [userId], references: [id])
+  order          Order?    @relation(fields: [relatedOrderId], references: [id])
 
   @@index([userId])
+  @@index([relatedOrderId])
 }
 
 model ImpersonationToken {
@@ -204,16 +208,16 @@ model ImpersonationToken {
 }
 
 model OperationLog {
-  id        String   @id @default(cuid())
-  adminId   String?
-  action    String
+  id         String   @id @default(cuid())
+  adminId    String?
+  action     String
   targetType String
-  targetId  String?
-  detail    String?  @db.Text
-  ip        String?
-  userAgent String?
-  createdAt DateTime @default(now())
-  admin     Admin?   @relation(fields: [adminId], references: [id])
+  targetId   String?
+  detail     String?  @db.Text
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  admin      Admin?   @relation(fields: [adminId], references: [id])
 
   @@index([adminId])
 }
