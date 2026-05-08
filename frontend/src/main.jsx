@@ -154,9 +154,22 @@ function textIncludes(value, keyword) {
 }
 
 function getRoute() {
-  const hashRoute = window.location.hash.replace(/^#/, '');
-  if (hashRoute) return hashRoute;
-  return `${window.location.pathname || '/'}${window.location.search || ''}`;
+  return window.location.pathname + (window.location.search || '');
+}
+
+function getClientSection(route) {
+  const path = route.split('?')[0];
+  const match = path.match(/^\/client\/(\w+)/);
+  if (match) return match[1];
+  const query = new URLSearchParams(route.split('?')[1] || '');
+  if (query.has('tickets')) return 'tickets';
+  return query.get('section') || 'overview';
+}
+
+function getAdminSection(route) {
+  const path = route.split('?')[0];
+  const match = path.match(/^\/admin\/(\w+)/);
+  return match ? match[1] : 'dashboard';
 }
 
 function App() {
@@ -289,7 +302,7 @@ function PublicHeader({ navigate, routePath, user, mobileNav, setMobileNav, site
           <span>{siteSettings.support_phone}</span>
           <span>{siteSettings.support_email}</span>
           <button onClick={() => navigate('/client')}>控制台</button>
-          <button onClick={() => navigate('/client?tickets')}>提交工單</button>
+          <button onClick={() => navigate('/client/tickets')}>提交工單</button>
         </div>
       </div>
       <div className="container nav-row">
@@ -551,7 +564,7 @@ function BuyPage({ products, user, navigate, setNotice }) {
     try {
       const order = await api('/api/orders', { method: 'POST', body: { productId: product.id, cycle } });
       setNotice(`订单 ${order.orderNo || '-'} 已创建，请在客户后台完成余额支付。`);
-      navigate('/client?section=orders');
+      navigate('/client/orders');
     } catch (error) {
       setNotice(error.message);
     }
@@ -645,8 +658,7 @@ function AuthPage({ refreshUser, setNotice, route }) {
 }
 
 function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
-  const routeQuery = new URLSearchParams(route.split('?')[1] || '');
-  const [section, setSection] = useState(routeQuery.has('tickets') ? 'tickets' : routeQuery.get('section') || 'overview');
+  const section = getClientSection(route);
   const [data, setData] = useState({ summary: null, orders: [], servers: [], wallet: [], tickets: [], notifications: [] });
   const [ticket, setTicket] = useState({ title: '', content: '' });
   const [orderDetail, setOrderDetail] = useState(null);
@@ -674,11 +686,6 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
   };
 
   useEffect(() => { load().catch((error) => setNotice(error.message)); }, []);
-  useEffect(() => {
-    const query = new URLSearchParams(route.split('?')[1] || '');
-    if (query.has('tickets')) setSection('tickets');
-    else if (query.get('section')) setSection(query.get('section'));
-  }, [route]);
   useEffect(() => { load().catch((error) => setNotice(error.message)); }, [section]);
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -704,7 +711,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
       return;
     }
     setHighlightedServerId(server.id);
-    setSection('servers');
+    navigate('/client/servers');
     setNotice(`已定位服务器：${server.name || server.ip}`);
   };
 
@@ -758,7 +765,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
     <main className="client-shell">
       <aside className="client-sidebar">
         <div className="client-profile"><div className="avatar">{user.username.slice(0, 1).toUpperCase()}</div><strong>{user.username}</strong><span>{user.email}</span><span>余额 {formatMoney(user.balance)}</span></div>
-        {clientMenu.map(([key, Icon, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}><Icon size={18} />{label}</button>)}
+        {clientMenu.map(([key, Icon, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => navigate(key === 'overview' ? '/client' : `/client/${key}`)}><Icon size={18} />{label}</button>)}
         <button onClick={logout}>退出登录</button>
       </aside>
       <section className="client-content">
@@ -851,8 +858,8 @@ function AdminLogin({ refreshAdmin, setNotice }) {
   );
 }
 
-function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProducts, refreshSiteSettings }) {
-  const [section, setSection] = useState('dashboard');
+function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProducts, refreshSiteSettings, route }) {
+  const section = getAdminSection(route);
   const [adminFilter, setAdminFilter] = useState('');
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [data, setData] = useState({ summary: {}, users: [], products: [], orders: [], servers: [], tickets: [], logs: [], settings: [] });
@@ -1031,7 +1038,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
       os: prev.os || 'Linux',
       loginUser: prev.loginUser || 'root'
     }));
-    setSection('servers');
+    navigate('/admin/servers');
     setNotice(`已选择待开通订单 ${order.orderNo}，请补充 IP 和密码后开通`);
   };
 
@@ -1162,20 +1169,20 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
           ['users', Users, '用户管理'],
           ['tickets', Ticket, '工单管理'],
           ['logs', Settings, '操作日志']
-        ].map(([key, Icon, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => setSection(key)}><Icon size={18} />{label}</button>)}
+        ].map(([key, Icon, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => navigate(key === 'dashboard' ? '/admin' : `/admin/${key}`)}><Icon size={18} />{label}</button>)}
       </aside>
       <section className="admin-main">
         <div className="admin-top">
           <label className="admin-search" htmlFor="admin-global-search"><Search size={17} /><input id="admin-global-search" name="adminSearch" value={adminFilter} onChange={(event) => setAdminFilter(event.target.value)} placeholder="搜索订单号 / 用户 / 产品 / IP / 工单" /></label>
-          <button className="icon-btn" onClick={() => setSection('tickets')} title="查看待处理工单"><Bell size={18} /></button>
+          <button className="icon-btn" onClick={() => navigate('/admin/tickets')} title="查看待处理工单"><Bell size={18} /></button>
           <div className="admin-user-menu">
             <button className="admin-user" onClick={() => setAdminMenuOpen((value) => !value)}><User size={17} />{admin.username}</button>
             {adminMenuOpen && (
               <div className="admin-dropdown">
                 <strong>{admin.name || admin.username}</strong>
                 <span>{admin.role || 'administrator'}</span>
-                <button onClick={() => { setSection('logs'); setAdminMenuOpen(false); }}>系统设置</button>
-                <button onClick={() => { setSection('tickets'); setAdminMenuOpen(false); }}>工单处理</button>
+                <button onClick={() => { navigate('/admin/logs'); setAdminMenuOpen(false); }}>系统设置</button>
+                <button onClick={() => { navigate('/admin/tickets'); setAdminMenuOpen(false); }}>工单处理</button>
                 <button onClick={() => { setPasswordForm({ open: true, currentPassword: '', newPassword: '', confirmPassword: '' }); setAdminMenuOpen(false); }}>修改密码</button>
                 <button onClick={logout}>退出登录</button>
               </div>
@@ -1688,7 +1695,7 @@ function PublicFooter({ siteSettings, navigate }) {
       <div className="container footer-grid">
         <div><div className="footer-brand"><Cloud size={26} />{siteSettings.site_name}</div><p>專業互聯網基礎服務提供商，香港伺服器、美國伺服器及 VPS 服務商。</p></div>
         <div><h3>產品中心</h3><a>雲伺服器</a><a>伺服器租用</a><a>伺服器託管</a></div>
-        <div><h3>服務支援</h3><a>服務條款</a><a>私隱政策</a><button className="footer-link" onClick={() => navigate('/client?tickets')}>提交工單</button></div>
+        <div><h3>服務支援</h3><a>服務條款</a><a>私隱政策</a><button className="footer-link" onClick={() => navigate('/client/tickets')}>提交工單</button></div>
         <div><h3>聯絡我們</h3><p>中國·香港</p><p>{siteSettings.support_phone}</p><p>{siteSettings.support_email}</p></div>
       </div>
       <div className="copyright">{siteSettings.copyright}</div>
