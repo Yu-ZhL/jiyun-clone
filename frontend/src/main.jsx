@@ -663,6 +663,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
   const [ticket, setTicket] = useState({ title: '', content: '' });
   const [orderDetail, setOrderDetail] = useState(null);
   const [highlightedServerId, setHighlightedServerId] = useState('');
+  const [selectedTicket, setSelectedTicket] = useState(null);
   const clientMenu = [
     ['overview', LayoutDashboard, '总览'],
     ['servers', Server, '我的服务器'],
@@ -756,6 +757,29 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
     }
   };
 
+  const submitTicketReply = async (ticketId, content) => {
+    try {
+      await api(`/api/client/tickets/${ticketId}/replies`, { method: 'POST', body: { content } });
+      setNotice('回复已发送');
+      await load();
+      const updated = (await api('/api/client/tickets')).find((t) => t.id === ticketId);
+      if (updated) setSelectedTicket(updated);
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const closeClientTicket = async (ticketId) => {
+    try {
+      await api(`/api/client/tickets/${ticketId}/close`, { method: 'POST' });
+      setNotice('工单已关闭');
+      await load();
+      setSelectedTicket(null);
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
   const logout = async () => {
     await api('/api/auth/logout', { method: 'POST' });
     location.reload();
@@ -804,12 +828,22 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
             ...(order.provisionStatus === 'opened' && getOrderServer(order) ? [['我的服务器', () => showOrderServer(order)]] : [])
           ]} />
         ])} /></Panel>}
-        {section === 'tickets' && (
+        {section === 'tickets' && (selectedTicket ? (
+          <ClientTicketDetail ticket={selectedTicket} onBack={() => setSelectedTicket(null)} onReply={(content) => submitTicketReply(selectedTicket.id, content)} onClose={() => closeClientTicket(selectedTicket.id)} />
+        ) : (
           <div className="two-col">
             <Panel title="提交工单"><form className="admin-form ticket-form" onSubmit={submitTicket}><input placeholder="标题" value={ticket.title} onChange={(event) => setTicket((prev) => ({ ...prev, title: event.target.value }))} required /><input placeholder="内容" value={ticket.content} onChange={(event) => setTicket((prev) => ({ ...prev, content: event.target.value }))} required /><button className="primary" type="submit">提交</button></form></Panel>
-            <Panel title="工单列表"><Rows rows={data.tickets.map((item) => ({ left: item.title, mid: formatDate(item.updatedAt), right: <StatusPill value={item.status} labels={ticketStatusLabels} /> }))} /></Panel>
+            <Panel title="工单列表">
+              {data.tickets.length ? data.tickets.map((item) => (
+                <div className="ticket-list-item" key={item.id} onClick={() => setSelectedTicket(item)}>
+                  <strong>{item.title}</strong>
+                  <StatusPill value={item.status} labels={ticketStatusLabels} />
+                  <em>{formatDate(item.updatedAt)}</em>
+                </div>
+              )) : <p className="muted">暂无工单</p>}
+            </Panel>
           </div>
-        )}
+        ))}
         {section === 'wallet' && <Panel title="余额流水"><Rows rows={data.wallet.map((item) => ({ left: item.remark || item.type, mid: formatMoney(item.amount), right: formatMoney(item.balanceAfter) }))} /></Panel>}
         {section === 'notifications' && <Panel title="站内通知"><DataTable columns={['通知', '关联订单', '内容', '时间', '状态', '操作']} rows={data.notifications.map((item) => [
           <NotificationTitle item={item} />,
@@ -822,6 +856,52 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
         {orderDetail && <OrderDetailModal order={orderDetail} server={getOrderServer(orderDetail)} onClose={() => setOrderDetail(null)} showServer={() => showOrderServer(orderDetail)} pay={pay} />}
       </section>
     </main>
+  );
+}
+
+function ClientTicketDetail({ ticket, onBack, onReply, onClose }) {
+  const [replyContent, setReplyContent] = useState('');
+  const replies = ticket.replies || [];
+
+  const handleReply = async (e) => {
+    e.preventDefault();
+    if (!replyContent.trim()) return;
+    await onReply(replyContent.trim());
+    setReplyContent('');
+  };
+
+  return (
+    <div className="ticket-detail-view">
+      <button className="table-action" onClick={onBack}><ChevronLeft size={16} />返回工单列表</button>
+      <div className="ticket-detail-head">
+        <h2>{ticket.title}</h2>
+        <StatusPill value={ticket.status} labels={ticketStatusLabels} />
+        <div className="ticket-detail-meta">
+          <span>分类：{ticket.category || 'support'}</span>
+          <span>创建时间：{formatDate(ticket.createdAt)}</span>
+          {ticket.closedAt && <span>关闭时间：{formatDate(ticket.closedAt)}</span>}
+        </div>
+      </div>
+      <div className="ticket-reply-thread">
+        {replies.map((reply) => (
+          <article className={`ticket-reply-card ${reply.senderType}`} key={reply.id}>
+            <div className="ticket-reply-head">
+              <strong>{reply.senderType === 'admin' ? '客服回复' : '我的回复'}</strong>
+              <em>{formatDate(reply.createdAt)}</em>
+            </div>
+            <div className="reply-body">{reply.content}</div>
+          </article>
+        ))}
+        {!replies.length && <p className="muted">暂无回复</p>}
+      </div>
+      {ticket.status !== 'closed' && (
+        <form className="ticket-reply-form" onSubmit={handleReply}>
+          <textarea value={replyContent} onChange={(e) => setReplyContent(e.target.value)} placeholder="输入回复内容..." required />
+          <button className="primary" type="submit">发送回复</button>
+          <button className="secondary" type="button" onClick={onClose}>关闭工单</button>
+        </form>
+      )}
+    </div>
   );
 }
 
@@ -1206,12 +1286,38 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
           </Modal>
         )}
         {replyForm.open && (
-          <Modal title={`回复工单：${replyForm.ticket.title}`} onClose={() => setReplyForm({ open: false, ticket: null, content: '' })}>
-            <form className="modal-form" onSubmit={submitReply}>
-              <label>回复内容<textarea value={replyForm.content} onChange={(event) => setReplyForm((prev) => ({ ...prev, content: event.target.value }))} required /></label>
-              <button className="primary" type="submit">发送回复</button>
-            </form>
-          </Modal>
+          <div className="ticket-conversation-modal">
+            <Modal title={`工单：${replyForm.ticket.title}`} onClose={() => setReplyForm({ open: false, ticket: null, content: '' })}>
+              <div className="ticket-conversation-body">
+                <div className="ticket-detail-meta">
+                  <span>用户：{replyForm.ticket.user?.username || '-'}</span>
+                  <span>分类：{replyForm.ticket.category || 'support'}</span>
+                  <span>状态：{ticketStatusLabels[replyForm.ticket.status] || replyForm.ticket.status}</span>
+                  <span>创建：{formatDate(replyForm.ticket.createdAt)}</span>
+                  {replyForm.ticket.closedAt && <span>关闭：{formatDate(replyForm.ticket.closedAt)}</span>}
+                </div>
+                {(replyForm.ticket.replies || []).map((reply) => (
+                  <article className={`ticket-reply-card ${reply.senderType}`} key={reply.id}>
+                    <div className="ticket-reply-head">
+                      <strong>{reply.senderType === 'admin' ? '后台回复' : '用户'}</strong>
+                      <em>{formatDate(reply.createdAt)}</em>
+                    </div>
+                    <div className="reply-body">{reply.content}</div>
+                  </article>
+                ))}
+                {(!replyForm.ticket.replies || !replyForm.ticket.replies.length) && <p className="muted">暂无回复记录</p>}
+              </div>
+              {replyForm.ticket.status !== 'closed' && (
+                <form className="modal-form" onSubmit={submitReply} style={{ marginTop: 18 }}>
+                  <label>回复内容<textarea value={replyForm.content} onChange={(event) => setReplyForm((prev) => ({ ...prev, content: event.target.value }))} required /></label>
+                  <div style={{ display: 'flex', gap: 10 }}>
+                    <button className="primary" type="submit">发送回复</button>
+                    <button className="secondary" type="button" onClick={() => { closeTicket(replyForm.ticket); setReplyForm({ open: false, ticket: null, content: '' }); }}>关闭工单</button>
+                  </div>
+                </form>
+              )}
+            </Modal>
+          </div>
         )}
         {userForm.open && (
           <Modal title={`编辑用户：${userForm.user.username}`} onClose={() => setUserForm({ open: false, user: null, email: '', phone: '', status: 'active' })}>
@@ -1447,7 +1553,8 @@ function AdminTickets({ tickets, keyword, openReply, closeTicket }) {
         <TicketLastReply ticket={ticket} />,
         <ActionGroup actions={[
           ['回复', () => openReply(ticket)],
-          ...(ticket.status !== 'closed' ? [['关闭', () => closeTicket(ticket)]] : [])
+          ...(ticket.status !== 'closed' ? [['关闭', () => closeTicket(ticket)]] : []),
+          ...(ticket.status === 'closed' ? [['查看', () => openReply(ticket)]] : [])
         ]} />
       ])} />
     </div>

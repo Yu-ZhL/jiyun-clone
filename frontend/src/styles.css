@@ -2103,6 +2103,150 @@ th {
   }
 }
 
+/* ---------- 工单详情 / 回复会话 ---------- */
+.ticket-detail-view {
+  display: grid;
+  gap: 22px;
+}
+
+.ticket-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px 22px;
+  padding: 20px;
+  border-radius: 8px;
+  background: white;
+  border: 1px solid var(--line);
+}
+
+.ticket-detail-head h2 {
+  margin: 0;
+  flex: 1 1 300px;
+  font-size: 20px;
+}
+
+.ticket-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.ticket-reply-thread {
+  display: grid;
+  gap: 20px;
+}
+
+.ticket-reply-card {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 8px;
+  background: white;
+  border: 1px solid var(--line);
+  border-left-width: 4px;
+}
+
+.ticket-reply-card.admin {
+  border-left-color: var(--primary);
+  background: #f6faff;
+}
+
+.ticket-reply-card.user {
+  border-left-color: var(--green);
+  background: #f6fdf9;
+}
+
+.ticket-reply-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ticket-reply-head strong {
+  font-size: 15px;
+  color: var(--text);
+}
+
+.ticket-reply-head em {
+  font-size: 12px;
+  color: var(--muted);
+  font-style: normal;
+}
+
+.ticket-reply-card .reply-body {
+  color: #334155;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ticket-reply-form {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.ticket-reply-form textarea {
+  flex: 1;
+  min-height: 62px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  resize: vertical;
+  color: var(--text);
+}
+
+.ticket-conversation-modal .modal-panel {
+  width: min(620px, 100%);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.ticket-conversation-body {
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  gap: 18px;
+  padding-right: 4px;
+}
+
+.ticket-conversation-body .ticket-detail-meta {
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: -4px;
+}
+
+.ticket-list-item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 12px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.ticket-list-item:hover {
+  background: var(--surface-2);
+}
+
+.ticket-list-item strong {
+  font-size: 15px;
+}
+
+.ticket-list-item em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
 @media (max-width: 640px) {
   .container {
     width: min(100% - 28px, 1180px);
