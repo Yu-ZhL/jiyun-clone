@@ -649,6 +649,8 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
   const [section, setSection] = useState(routeQuery.has('tickets') ? 'tickets' : routeQuery.get('section') || 'overview');
   const [data, setData] = useState({ summary: null, orders: [], servers: [], wallet: [], tickets: [], notifications: [] });
   const [ticket, setTicket] = useState({ title: '', content: '' });
+  const [orderDetail, setOrderDetail] = useState(null);
+  const [highlightedServerId, setHighlightedServerId] = useState('');
   const clientMenu = [
     ['overview', LayoutDashboard, '总览'],
     ['servers', Server, '我的服务器'],
@@ -684,6 +686,27 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
     }, 15000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (section !== 'notifications') return;
+    const unread = data.notifications.filter((item) => !item.readAt);
+    if (!unread.length) return;
+    Promise.all(unread.map((item) => api(`/api/client/notifications/${item.id}/read`, { method: 'POST' })))
+      .then(load)
+      .catch((error) => setNotice(error.message));
+  }, [section, data.notifications.length]);
+
+  const getOrderServer = (order) => order.openedServer || order.server || data.servers.find((server) => server.orderId === order.id || server.order?.id === order.id);
+
+  const showOrderServer = (order) => {
+    const server = getOrderServer(order);
+    if (!server) {
+      setNotice('这个订单还没有关联服务器');
+      return;
+    }
+    setHighlightedServerId(server.id);
+    setSection('servers');
+    setNotice(`已定位服务器：${server.name || server.ip}`);
+  };
 
   const pay = async (orderId) => {
     try {
@@ -699,6 +722,15 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
     try {
       const order = await api(`/api/client/servers/${serverId}/renew`, { method: 'POST', body: { cycle: 'monthly' } });
       setNotice(`续费订单 ${order.orderNo} 已创建`);
+      await load();
+    } catch (error) {
+      setNotice(error.message);
+    }
+  };
+
+  const markNotificationRead = async (notificationId) => {
+    try {
+      await api(`/api/client/notifications/${notificationId}/read`, { method: 'POST' });
       await load();
     } catch (error) {
       setNotice(error.message);
@@ -751,7 +783,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
             </div>
           </>
         )}
-        {section === 'servers' && <Panel title="我的服务器"><DataTable columns={['名称', 'IP', '系统', '登录', '到期时间', '状态', '操作']} rows={data.servers.map((server) => [server.name, server.ip, server.os, `${server.loginUser} / ${server.loginPassword}`, formatDate(server.expiresAt), <StatusPill value={server.status} labels={serverStatusLabels} />, <button className="table-action" onClick={() => renew(server.id)}>续费</button>])} /></Panel>}
+        {section === 'servers' && <Panel title="我的服务器"><ServerCards servers={data.servers} highlightedServerId={highlightedServerId} renew={renew} /></Panel>}
         {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单', '产品与消息', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [
           <OrderNumberCell order={order} />,
           <OrderProductCell order={order} />,
@@ -759,7 +791,11 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
           formatMoney(order.amount),
           <StatusPill value={order.payStatus} labels={payStatusLabels} />,
           <StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />,
-          order.payStatus === 'unpaid' ? <button className="table-action" onClick={() => pay(order.id)}>余额支付</button> : '-'
+          <ActionGroup actions={[
+            ['查看详情', () => setOrderDetail(order)],
+            ...(order.payStatus === 'unpaid' ? [['余额支付', () => pay(order.id)]] : []),
+            ...(order.provisionStatus === 'opened' && getOrderServer(order) ? [['我的服务器', () => showOrderServer(order)]] : [])
+          ]} />
         ])} /></Panel>}
         {section === 'tickets' && (
           <div className="two-col">
@@ -768,13 +804,15 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
           </div>
         )}
         {section === 'wallet' && <Panel title="余额流水"><Rows rows={data.wallet.map((item) => ({ left: item.remark || item.type, mid: formatMoney(item.amount), right: formatMoney(item.balanceAfter) }))} /></Panel>}
-        {section === 'notifications' && <Panel title="站内通知"><DataTable columns={['通知', '关联订单', '内容', '时间', '状态']} rows={data.notifications.map((item) => [
+        {section === 'notifications' && <Panel title="站内通知"><DataTable columns={['通知', '关联订单', '内容', '时间', '状态', '操作']} rows={data.notifications.map((item) => [
           <NotificationTitle item={item} />,
           item.order?.orderNo || '-',
           <div className="message-preview notification-content"><span>{item.content}</span></div>,
           formatDate(item.createdAt),
-          item.readAt ? '已读' : '未读'
+          item.readAt ? '已读' : '未读',
+          item.readAt ? '-' : <button className="table-action" onClick={() => markNotificationRead(item.id)}>标记已读</button>
         ])} /></Panel>}
+        {orderDetail && <OrderDetailModal order={orderDetail} server={getOrderServer(orderDetail)} onClose={() => setOrderDetail(null)} showServer={() => showOrderServer(orderDetail)} pay={pay} />}
       </section>
     </main>
   );
@@ -1501,6 +1539,75 @@ function NotificationTitle({ item }) {
       <strong>{item.title}</strong>
       <small>{item.type === 'order_message' ? '订单消息' : item.type === 'server_opened' ? '开通通知' : item.type === 'ticket_reply' ? '工单回复' : item.type}</small>
     </div>
+  );
+}
+
+function ServerCards({ servers, highlightedServerId, renew }) {
+  if (!servers.length) return <p className="muted">暂无服务器</p>;
+  return (
+    <div className="server-card-grid">
+      {servers.map((server) => {
+        const relatedOrders = [server.order, ...(server.orders || [])].filter(Boolean);
+        const latestMessage = server.order?.notifications?.[0];
+        return (
+          <article className={`server-card ${highlightedServerId === server.id ? 'highlight' : ''}`} key={server.id}>
+            <div className="server-card-head">
+              <div>
+                <strong>{server.name}</strong>
+                <span>{server.product?.name || '-'}</span>
+              </div>
+              <StatusPill value={server.status} labels={serverStatusLabels} />
+            </div>
+            <div className="server-kv">
+              <span>IP 地址</span><strong>{server.ip}</strong>
+              <span>系统</span><strong>{server.os || '-'}</strong>
+              <span>登录信息</span><strong>{server.loginUser} / {server.loginPassword}</strong>
+              <span>到期时间</span><strong>{formatDate(server.expiresAt)}</strong>
+              <span>关联订单</span><strong>{relatedOrders.map((order) => order.orderNo).join(' / ') || '-'}</strong>
+            </div>
+            {latestMessage && <div className="message-preview server-message"><MessageSquare size={14} /><span>{latestMessage.content}</span></div>}
+            <div className="server-card-actions">
+              <button className="table-action" onClick={() => renew(server.id)}>续费</button>
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
+function OrderDetailModal({ order, server, onClose, showServer, pay }) {
+  const messages = order.notifications || [];
+  return (
+    <Modal title={`订单详情：${order.orderNo}`} onClose={onClose}>
+      <div className="order-detail">
+        <div className="detail-grid">
+          <span>产品</span><strong>{order.product?.name || '-'}</strong>
+          <span>订单类型</span><strong>{orderTypeLabels[order.type] || order.type}</strong>
+          <span>金额</span><strong>{formatMoney(order.amount)}</strong>
+          <span>周期</span><strong>{order.cycle === 'yearly' ? '年付' : order.cycle === 'monthly' ? '月付' : '-'}</strong>
+          <span>支付状态</span><StatusPill value={order.payStatus} labels={payStatusLabels} />
+          <span>开通状态</span><StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />
+          <span>创建时间</span><strong>{formatDate(order.createdAt)}</strong>
+          <span>支付时间</span><strong>{formatDate(order.paidAt)}</strong>
+          <span>关联服务器</span><strong>{server ? `${server.name || '-'} / ${server.ip || '-'}` : '-'}</strong>
+        </div>
+        <div className="detail-section">
+          <h3>订单消息</h3>
+          {messages.length ? messages.map((message) => (
+            <div className="message-preview detail-message" key={message.id}>
+              <MessageSquare size={14} />
+              <span>{message.content}</span>
+              <em>{formatDate(message.createdAt)}</em>
+            </div>
+          )) : <p className="muted">暂无订单消息</p>}
+        </div>
+        <div className="modal-actions">
+          {order.payStatus === 'unpaid' && <button className="primary" onClick={() => pay(order.id)}>余额支付</button>}
+          {server && <button className="primary" onClick={() => { onClose(); showServer(); }}>查看我的服务器</button>}
+        </div>
+      </div>
+    </Modal>
   );
 }
 

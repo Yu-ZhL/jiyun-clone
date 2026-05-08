@@ -1393,6 +1393,92 @@ th {
   max-width: 520px;
 }
 
+.server-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.server-card {
+  display: grid;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.server-card.highlight {
+  border-color: rgba(29, 114, 243, 0.55);
+  box-shadow: 0 18px 42px rgba(29, 114, 243, 0.14);
+}
+
+.server-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.server-card-head div,
+.server-kv,
+.order-detail,
+.detail-section {
+  display: grid;
+  gap: 6px;
+}
+
+.server-card-head strong {
+  font-size: 18px;
+}
+
+.server-card-head span,
+.server-kv span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.server-kv {
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 8px 12px;
+}
+
+.server-kv strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.server-message,
+.detail-message {
+  max-width: none;
+}
+
+.server-card-actions,
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.order-detail {
+  gap: 18px;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr);
+  gap: 10px 14px;
+}
+
+.detail-grid span {
+  color: var(--muted);
+}
+
+.detail-section h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
 .two-col {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1972,7 +2058,8 @@ th {
   }
 
   .proof-grid,
-  .testimonial-track {
+  .testimonial-track,
+  .server-card-grid {
     grid-template-columns: 1fr 1fr;
   }
 
@@ -2052,10 +2139,11 @@ th {
   .service-grid,
   .metric-grid,
   .admin-metrics,
-  .footer-grid,
-  .proof-grid,
-  .testimonial-track,
-  .admin-form,
+    .footer-grid,
+    .proof-grid,
+    .testimonial-track,
+    .server-card-grid,
+    .admin-form,
   .product-form,
   .settings-grid {
     grid-template-columns: 1fr;

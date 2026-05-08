@@ -393,6 +393,18 @@ export function createApp() {
       include: {
         product: true,
         server: true,
+        openedServer: {
+          select: {
+            id: true,
+            name: true,
+            ip: true,
+            os: true,
+            status: true,
+            expiresAt: true,
+            orderId: true,
+            product: true
+          }
+        },
         notifications: { orderBy: { createdAt: 'desc' } }
       },
       orderBy: { createdAt: 'desc' }
@@ -400,12 +412,20 @@ export function createApp() {
   }));
 
   app.get('/api/client/servers', requireUser, asyncRoute(async (req, res) => {
-    const servers = await prisma.server.findMany({ where: { userId: req.user.id, deletedAt: null }, include: { product: true }, orderBy: { createdAt: 'desc' } });
+    const servers = await prisma.server.findMany({
+      where: { userId: req.user.id, deletedAt: null },
+      include: {
+        product: true,
+        order: { include: { notifications: { orderBy: { createdAt: 'desc' } } } },
+        orders: { orderBy: { createdAt: 'desc' } }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
     ok(res, servers.map((server) => serializeServer(server, true)));
   }));
 
   app.get('/api/client/servers/:id', requireUser, asyncRoute(async (req, res) => {
-    const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user.id }, include: { product: true } });
+    const server = await prisma.server.findFirst({ where: { id: req.params.id, userId: req.user.id }, include: { product: true, order: true, orders: { orderBy: { createdAt: 'desc' } } } });
     if (!server) return fail(res, 40402, '服务器不存在', 404);
     ok(res, serializeServer(server, true));
   }));

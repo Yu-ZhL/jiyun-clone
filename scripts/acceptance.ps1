@@ -153,6 +153,14 @@ $clientServer = $servers | Where-Object { $_.id -eq $server.id } | Select-Object
 if (-not $clientServer -or $clientServer.loginPassword -ne 'Secret!234') {
   throw 'client server not visible or password decrypt failed'
 }
+if ($clientServer.order.orderNo -ne $order.orderNo) { throw 'client server related order missing' }
+$clientOrdersAfterOpen = Call-Api GET '/api/client/orders' $null $userSession
+$clientOpenedOrder = $clientOrdersAfterOpen | Where-Object { $_.id -eq $order.id } | Select-Object -First 1
+if ($clientOpenedOrder.openedServer.id -ne $server.id) { throw 'client order opened server relation missing' }
+$unreadOrderMessage = (Call-Api GET '/api/client/notifications' $null $userSession | Where-Object { $_.id -eq $orderMessage.id } | Select-Object -First 1)
+if (-not $unreadOrderMessage -or $unreadOrderMessage.readAt) { throw 'order message read state invalid before read' }
+$readOrderMessage = Call-Api POST "/api/client/notifications/$($orderMessage.id)/read" $null $userSession
+if (-not $readOrderMessage.readAt) { throw 'notification read failed' }
 $editedServer = Call-Api PUT "/api/admin/servers/$($server.id)" @{ name = "ACC-EDIT-$suffix"; ip = '10.88.66.11'; os = 'Debian 12'; loginUser = 'adminroot'; expiresAt = (Get-Date).AddDays(40).ToString('yyyy-MM-dd') } $adminSession
 if ($editedServer.name -notmatch 'ACC-EDIT' -or $editedServer.ip -ne '10.88.66.11') { throw 'admin server edit failed' }
 $suspendedServer = Call-Api POST "/api/admin/servers/$($server.id)/suspend" $null $adminSession
