@@ -1353,6 +1353,12 @@ export function createApp() {
     res.status(410).json({ code: 410, message: '旧同步接口已废弃，请使用 POST /api/admin/upstream/fastmos/fetch-preview', data: null });
   });
 
+  app.get('/api/admin/upstream/fastmos/sync-runs/:runId', requireAdmin, asyncRoute(async (req, res) => {
+    const run = await prisma.upstreamSyncRun.findUnique({ where: { id: req.params.runId } });
+    if (!run) return fail(res, 40409, '同步记录不存在', 404);
+    ok(res, run);
+  }));
+
   app.get('/api/admin/upstream/fastmos/sync-runs', requireAdmin, asyncRoute(async (_req, res) => {
     const runs = await prisma.upstreamSyncRun.findMany({
       orderBy: { startedAt: 'desc' }, take: 20
