@@ -60,6 +60,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   const [serverEditForm, setServerEditForm] = useState({ open: false, server: null, values: {} });
   const [passwordForm, setPasswordForm] = useState({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' });
   const [orderMessageForm, setOrderMessageForm] = useState({ open: false, order: null, content: '' });
+  const [refundForm, setRefundForm] = useState({ open: false, order: null, remark: '' });
   const [settingsForm, setSettingsForm] = useState({});
   const [upstreamSummary, setUpstreamSummary] = useState({ products: 0, newCount: 0, changedCount: 0, offlineCount: 0 });
   const [syncing, setSyncing] = useState(false);
@@ -254,12 +255,25 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   };
 
   const orderAction = async (order, action) => {
+    if (action === 'refund') {
+      setRefundForm({ open: true, order, remark: '' });
+      return;
+    }
     try {
       await api(`/api/admin/orders/${order.id}/${action}`, { method: 'POST' });
       await load();
-    } catch (error) {
-      setNotice(error.message);
-    }
+    } catch (error) { setNotice(error.message); }
+  };
+
+  const submitRefund = async (e) => {
+    e.preventDefault();
+    if (!refundForm.order) return;
+    try {
+      await api(`/api/admin/orders/${refundForm.order.id}/refund`, { method: 'POST', body: { confirm: true, remark: refundForm.remark } });
+      setNotice(`订单 ${refundForm.order.orderNo} 已退款`);
+      setRefundForm({ open: false, order: null, remark: '' });
+      await load();
+    } catch (error) { setNotice(error.message); }
   };
 
   const openProvisionFromOrder = (order) => {
@@ -400,7 +414,6 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
           ['orders', ReceiptText, '订单管理'],
           ['users', Users, '用户管理'],
           ['tickets', Ticket, '工单管理'],
-          ['upstream', RefreshCw, '上游产品'],
           ['logs', Settings, '操作日志']
         ].map(([key, Icon, label]) => <button key={key} className={section === key ? 'active' : ''} onClick={() => navigate(key === 'dashboard' ? '/admin' : `/admin/${key}`)}><Icon size={18} />{label}</button>)}
       </aside>
@@ -423,12 +436,11 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
           </div>
         </div>
         {section === 'dashboard' && <AdminSummary summary={data.summary} runJobs={runJobs} />}
-        {section === 'products' && <AdminProducts products={data.products} keyword={adminFilter} form={productForm} setForm={setProductForm} addProduct={addProduct} updateProductStatus={updateProductStatus} openProductEdit={openProductEdit} upstreamSummary={upstreamSummary} syncUpstream={syncUpstream} cleanupTestProducts={cleanupTestProducts} syncing={syncing} navigate={navigate} />}
+        {(section === 'products' || section === 'upstream') && <MergedProductsPage products={data.products} keyword={adminFilter} form={productForm} setForm={setProductForm} addProduct={addProduct} updateProductStatus={updateProductStatus} openProductEdit={openProductEdit} upstreamSummary={upstreamSummary} syncUpstreamOriginal={syncUpstream} cleanupTestProducts={cleanupTestProducts} syncing={syncing} navigate={navigate} api={api} setNotice={setNotice} load={load} />}
         {section === 'orders' && <AdminOrders orders={data.orders} keyword={adminFilter} markPaid={markPaid} orderAction={orderAction} openOrderMessage={(order) => setOrderMessageForm({ open: true, order, content: '' })} openProvision={openProvisionFromOrder} />}
         {section === 'servers' && <AdminServers servers={data.servers} keyword={adminFilter} orders={pendingPaidOrders} form={serverForm} setForm={setServerForm} openServer={openServer} openServerEdit={openServerEdit} serverAction={serverAction} />}
         {section === 'users' && <AdminUsers users={data.users} keyword={adminFilter} openUserEdit={openUserEdit} openRecharge={(user) => setRechargeForm({ open: true, user, amount: '', remark: '后台手动充值' })} setUserStatus={setUserStatus} impersonate={impersonate} />}
         {section === 'tickets' && <AdminTickets tickets={data.tickets} keyword={adminFilter} openReply={(ticket) => setReplyForm({ open: true, ticket, content: '' })} closeTicket={closeTicket} />}
-        {section === 'upstream' && <AdminUpstream api={api} setNotice={setNotice} load={load} />}
         {section === 'logs' && <AdminLogs logs={data.logs} keyword={adminFilter} settings={data.settings} settingsForm={settingsForm} setSettingsForm={setSettingsForm} saveSettings={saveSettings} />}
         {rechargeForm.open && (
           <Modal title={`给 ${rechargeForm.user.username} 充值`} onClose={() => setRechargeForm({ open: false, user: null, amount: '', remark: '' })}>
@@ -513,6 +525,28 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
             </form>
           </Modal>
         )}
+        {refundForm.open && (
+          <Modal title="确认退款" onClose={() => setRefundForm({ open: false, order: null, remark: '' })}>
+            <div style={{ marginBottom: 16 }}>
+              <div className="detail-grid">
+                <span>订单号</span><strong>{refundForm.order.orderNo}</strong>
+                <span>用户</span><strong>{refundForm.order.user?.username || '-'}</strong>
+                <span>产品</span><strong>{refundForm.order.product?.name || '-'}</strong>
+                <span>退款金额</span><strong>{formatMoney(refundForm.order.amount)}</strong>
+                <span>支付状态</span><StatusPill value={refundForm.order.payStatus} labels={payStatusLabels} />
+              </div>
+              <p className="muted" style={{ marginTop: 12, fontSize: '0.85rem' }}>退款将把金额退回用户余额，并生成钱包流水。</p>
+            </div>
+            <form className="modal-form" onSubmit={submitRefund}>
+              <label>退款备注（可选）<input value={refundForm.remark} onChange={e => setRefundForm(p => ({ ...p, remark: e.target.value }))} placeholder="退款原因" /></label>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="secondary" type="button" onClick={() => setRefundForm({ open: false, order: null, remark: '' })}>取消</button>
+                <button className="primary" type="submit">确认退款</button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
         {passwordForm.open && (
           <Modal title="修改管理员密码" onClose={() => setPasswordForm({ open: false, currentPassword: '', newPassword: '', confirmPassword: '' })}>
             <form className="modal-form" onSubmit={submitAdminPassword}>
@@ -587,60 +621,418 @@ function ProductFields({ form, setForm, onSubmit, submitLabel }) {
   );
 }
 
-function AdminProducts({ products, keyword, form, setForm, addProduct, updateProductStatus, openProductEdit, upstreamSummary, syncUpstream, cleanupTestProducts, syncing, navigate }) {
-  const rows = products.filter((product) => [product.name, product.type, product.location, product.cpu, product.memory, product.disk, product.bandwidth, product.status].some((value) => textIncludes(value, keyword)));
+// Merged: /admin/products + /admin/upstream in tabs
+function MergedProductsPage({ products, keyword, form, setForm, addProduct, updateProductStatus, openProductEdit, upstreamSummary, syncUpstreamOriginal, cleanupTestProducts, syncing, navigate, api, setNotice, load }) {
+  const [tab, setTab] = useState('upstream');
+  const [upProducts, setUpProducts] = useState([]);
+  const [diff, setDiff] = useState({ new: [], changed: [], offline: [], unchanged: [], localOnly: [] });
+  const [diffTab, setDiffTab] = useState('new');
+  const [selected, setSelected] = useState(new Set());
+  const [merging, setMerging] = useState(false);
+  const [filterGroup, setFilterGroup] = useState('');
+  const [filterStatus, setFilterStatus] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [syncProgress, setSyncProgress] = useState(null);
+  const [syncLogs, setSyncLogs] = useState([]);
+  const [syncRuns, setSyncRuns] = useState([]);
+  const [showSyncLogs, setShowSyncLogs] = useState(false);
+  const [detailItem, setDetailItem] = useState(null);
+  const [editItem, setEditItem] = useState(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(null);
+  const [crudForm, setCrudForm] = useState({});
+  const [crudSaving, setCrudSaving] = useState(false);
+  const [localProductAction, setLocalProductAction] = useState(null);
+  const [_syncing2, _setSyncing2] = useState(false);
+  const [syncPoller, setSyncPoller] = useState(null);
+
+  const emptyCrudForm = { title: '', areaGroup: '', area: '', netline: '', cpu: '', cpuCount: '1', memory: '', disk: '', diskNum: '1', diskSn: '', bandwidth: '', defense: '', priceMonthly: '', priceShow: '', stock: '0', status: 'on_sale', sortOrder: '0', netDesc: '' };
+  const formatPrice = (cents) => cents != null ? `$${(cents / 100).toFixed(0)}` : '-';
+  const stockDisplay = (s) => (s == null || s === -1) ? <span className="status-pill on_sale">不限</span> : s === 0 ? <span className="status-pill off_sale">售罄</span> : <span>{s}</span>;
+
+  const fetchUpProducts = async () => {
+    try { setUpProducts(await api('/api/admin/upstream/fastmos/products')); } catch (_) {}
+  };
+  const fetchDiff = async () => {
+    try { setDiff(await api('/api/admin/upstream/fastmos/diff')); setSelected(new Set()); } catch (_) {}
+  };
+  const fetchSyncRuns = async () => {
+    try { setSyncRuns(await api('/api/admin/upstream/fastmos/sync-runs')); } catch (_) {}
+  };
+
+  const syncUpstream = async () => {
+    _setSyncing2(true);
+    setSyncProgress(null); setSyncLogs([]);
+    try {
+      const result = await api('/api/admin/upstream/fastmos/sync', { method: 'POST' });
+      if (result.runId) {
+        setSyncProgress({ id: result.runId, status: 'running', startedAt: new Date().toISOString() });
+        setNotice('同步已启动，正在后台执行...');
+        // Poll every 2s
+        const timer = setInterval(async () => {
+          try {
+            const cur = await api('/api/admin/upstream/fastmos/sync-current');
+            if (cur) {
+              setSyncProgress(cur.run);
+              setSyncLogs(cur.logs || []);
+              if (cur.run?.status !== 'running') {
+                clearInterval(timer); _setSyncing2(false);
+                setNotice(`同步完成：${cur.run?.fetchedCount || 0} 台`);
+                await Promise.all([fetchUpProducts(), fetchDiff(), fetchSyncRuns(), load()]);
+              }
+            } else { clearInterval(timer); _setSyncing2(false); }
+          } catch { clearInterval(timer); _setSyncing2(false); }
+        }, 2000);
+        setSyncPoller(timer);
+      }
+    } catch (e) { setNotice(e.message); _setSyncing2(false); }
+  };
+
+  useEffect(() => { fetchUpProducts(); fetchDiff(); fetchSyncRuns(); return () => { if (syncPoller) clearInterval(syncPoller); }; }, []);
+
+  // CRUD
+  const openCreate = () => { setCrudForm({ ...emptyCrudForm }); setCreateOpen(true); };
+  const openEdit = (item) => { setCrudForm({ title: item.title || '', areaGroup: item.areaGroup || '', area: item.area || '', netline: item.netline || '', cpu: item.cpu || '', cpuCount: String(item.cpuCount || 1), memory: item.memory || '', disk: item.disk || '', diskNum: String(item.diskNum || 1), diskSn: item.diskSn || '', bandwidth: item.bandwidth || '', defense: item.defense || '', priceMonthly: String(item.priceMonthly || ''), priceShow: item.priceShow || '', stock: String(item.stock ?? 0), status: item.status || 'on_sale', sortOrder: String(item.sortOrder || 0), netDesc: item.netDesc || '' }); setEditItem(item); };
+  const saveCrud = async (e) => { e.preventDefault(); setCrudSaving(true); try { if (editItem) { await api(`/api/admin/upstream/fastmos/products/${editItem.id}`, { method: 'PUT', body: crudForm }); setNotice('已更新'); } else { await api('/api/admin/upstream/fastmos/products', { method: 'POST', body: crudForm }); setNotice('已新增'); } setCreateOpen(false); setEditItem(null); await Promise.all([fetchUpProducts(), fetchDiff()]); } catch (e2) { setNotice(e2.message); } finally { setCrudSaving(false); } };
+  const doDeleteUpstream = async () => { if (!deleteConfirm) return; setCrudSaving(true); try { const result = await api(`/api/admin/upstream/fastmos/products/${deleteConfirm.id}`, { method: 'DELETE', body: { action: deleteConfirm.action || 'offline' } }); setNotice(result.action === 'offline' ? '已下架' : '已删除'); setDeleteConfirm(null); await Promise.all([fetchUpProducts(), fetchDiff()]); } catch (e2) { setNotice(e2.message); } finally { setCrudSaving(false); } };
+  const openDeleteUpstream = (item) => { setDeleteConfirm(item.productId ? { ...item, action: 'offline' } : { ...item, action: 'force' }); };
+
+  // localOnly operations
+  const openLocalProductAction = (item, action) => { setLocalProductAction({ item, action }); };
+  const doLocalProductAction = async () => {
+    if (!localProductAction) return;
+    const { item, action } = localProductAction;
+    try {
+      if (action === 'delete') {
+        await api(`/api/admin/products/${item.id}`, { method: 'DELETE' });
+        setNotice('已删除产品');
+      } else if (action === 'off_sale') {
+        await api(`/api/admin/products/${item.id}/off-sale`, { method: 'POST' });
+        setNotice('已下架产品');
+      }
+      setLocalProductAction(null);
+      await Promise.all([load(), fetchDiff()]);
+    } catch (e2) { setNotice(e2.message); setLocalProductAction(null); }
+  };
+  const editLocalProduct = (item) => { openProductEdit(item); };
+
+  // Merge
+  const doMerge = async (action, ids) => {
+    const upstreamIds = ids || Array.from(selected);
+    if (upstreamIds.length === 0) { setNotice('请先勾选'); return; }
+    setMerging(true);
+    try {
+      const result = await api('/api/admin/upstream/fastmos/merge', { method: 'POST', body: { action, upstreamIds } });
+      setNotice(`完成：新增${result.created} 更新${result.updated} 忽略${result.ignored} 下架${result.offlined}`);
+      setSelected(new Set());
+      await Promise.all([fetchUpProducts(), fetchDiff(), load()]);
+    } catch (e2) { setNotice(e2.message); } finally { setMerging(false); }
+  };
+  const singleMerge = (item, action) => doMerge(action, [item.upstreamId || item.id]);
+  const toggleSelect = (id) => { const n = new Set(selected); if (n.has(id)) n.delete(id); else n.add(id); setSelected(n); };
+
+  // Sync logs
+  const viewRunLogs = async (runId) => {
+    try {
+      const run = syncRuns.find(r => r.id === runId);
+      const logs = await api(`/api/admin/upstream/fastmos/sync-runs/${runId}/logs`);
+      setSyncProgress(run); setSyncLogs(logs); setShowSyncLogs(true);
+    } catch (e2) { setNotice(e2.message); }
+  };
+
+  // Filter
+  const currentDiff = diff[diffTab] || [];
+  const groups = [...new Set(upProducts.map(p => p.areaGroup || '其他'))].sort();
+  const filtered = currentDiff.filter(item => {
+    if (filterGroup && (item.areaGroup || item.location || '') !== filterGroup) return false;
+    if (filterStatus && item.status !== filterStatus) return false;
+    if (searchText) {
+      const q = searchText.toLowerCase();
+      const hay = [item.upstreamId, item.id, item.title, item.name, item.cpu, item.memory, item.disk, item.bandwidth, String(item.priceMonthly || ''), item.areaGroup, item.area, item.netline, item.priceShow].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const publishedCount = upProducts.filter(p => p.published).length;
+  const unpublishedCount = upProducts.filter(p => !p.published && p.status === 'on_sale').length;
+
+  const tabs = [['new', '新增', diff.new?.length || 0], ['changed', '变更', diff.changed?.length || 0], ['offline', '下架', diff.offline?.length || 0], ['unchanged', '未变', diff.unchanged?.length || 0], ['localOnly', '本地独有', diff.localOnly?.length || 0]];
+  const pageTabs = ['上游产品', '本站产品', '差异处理', '同步日志'];
+
+  // For localOnly: identify product status
+  const getLocalProductStatus = (item) => {
+    if (!item.orders) return '无订单';
+    return item.orders.length > 0 ? `有${item.orders.length}个订单` : '无订单';
+  };
+
   return (
-    <div className="admin-page">
-      <h1>产品管理</h1>
-
-      {/* Upstream sync operation area */}
-      <Panel title="上游服务器同步">
-        <div className="dashboard-actions" style={{ marginBottom: 16 }}>
-          <button className="primary" onClick={syncUpstream} disabled={syncing}>
-            <RefreshCw size={17} />{syncing ? '同步中...' : '同步上游服务器'}
+    <div className="admin-page admin-upstream-page">
+      <div className="dashboard-head">
+        <h1>产品管理</h1>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="primary" onClick={syncUpstream} disabled={_syncing2}>
+            <RefreshCw size={17} />{_syncing2 ? '同步中...' : '同步上游服务器'}
           </button>
-          <button className="secondary" onClick={() => navigate('/admin/upstream')}>查看差异/合并</button>
+          <button className="secondary" onClick={openCreate}><Plus size={17} />新增上游产品</button>
           <button className="secondary" onClick={cleanupTestProducts}>清理测试产品</button>
-          <button className="secondary" onClick={async () => {
-            try {
-              const r = await api('/api/admin/maintenance/cleanup-test-business-data', { method: 'POST', body: { dryRun: true } });
-              const c = r.counts;
-              setNotice(`预览：Renewal ${c.Renewal}，Server ${c.Server}，Order ${c.Order}，Wallet ${c.WalletTransaction}，Notif ${c.Notification}，TicketReply ${c.TicketReply}，Ticket ${c.Ticket}，Token ${c.ImpersonationToken}`);
-            } catch (e) { setNotice(e.message); }
-          }}>预览清理业务数据</button>
-          <button className="secondary" onClick={async () => {
-            if (!window.confirm('确认清理所有测试业务数据？此操作不可撤销！')) return;
-            try {
-              const r = await api('/api/admin/maintenance/cleanup-test-business-data', { method: 'POST', body: { dryRun: false, confirm: 'CLEAR_TEST_BUSINESS_DATA' } });
-              const c = r.counts;
-              setNotice(`已清理：订单${c.Order} 服务器${c.Server} 钱包${c.WalletTransaction} 通知${c.Notification} 工单${c.Ticket}`);
-              await load();
-            } catch (e) { setNotice(e.message); }
-          }}>确认清理业务数据</button>
         </div>
-        <div className="admin-metrics" style={{ marginBottom: 0 }}>
-          <article className="metric-card"><div><Server size={18} /></div><span>上游产品总数</span><strong>{upstreamSummary.products}</strong></article>
-          <article className="metric-card"><div><PackagePlus size={18} /></div><span>待处理新增</span><strong>{upstreamSummary.newCount}</strong></article>
-          <article className="metric-card"><div><Bell size={18} /></div><span>待处理变更</span><strong>{upstreamSummary.changedCount}</strong></article>
-          <article className="metric-card"><div><ReceiptText size={18} /></div><span>待处理下架</span><strong>{upstreamSummary.offlineCount}</strong></article>
-        </div>
-      </Panel>
+      </div>
 
-      <Panel title="新增购买方案"><ProductFields form={form} setForm={setForm} submitLabel="新增" onSubmit={addProduct} /></Panel>
-      <DataTable pagination columns={['产品名称', '类型', '地区', '配置', '月付', '年付', '库存', '状态', '操作']} rows={rows.map((product) => [
-        product.name,
-        product.type,
-        product.location,
-        `${product.cpu} / ${product.memory} / ${product.disk}`,
-        formatMoney(product.priceMonthly),
-        formatMoney(product.priceYearly),
-        product.stock,
-        <StatusPill value={product.status} labels={productStatusLabels} />,
-        <ActionGroup actions={[
-          ['编辑', () => openProductEdit(product)],
-          [product.status === 'on_sale' ? '下架' : '上架', () => updateProductStatus(product, product.status === 'on_sale' ? 'off_sale' : 'on_sale')]
-        ]} />
-      ])} />
+      {/* Sync progress */}
+      {_syncing2 && syncProgress && (
+        <div className="admin-upstream-sync-progress">
+          <div className="sync-progress-bar">
+            <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
+            <span>同步中... {syncProgress.fetchedCount ? `已抓取 ${syncProgress.fetchedCount} 台` : ''}</span>
+            {syncProgress.startedAt && <span className="muted" style={{ fontSize: '0.8rem' }}>耗时 {Math.floor((Date.now() - new Date(syncProgress.startedAt).getTime()) / 1000)}s</span>}
+            {syncLogs.length > 0 && <span className="muted" style={{ fontSize: '0.82rem' }}>最近: {syncLogs[syncLogs.length - 1]?.message?.slice(0, 60)}</span>}
+          </div>
+        </div>
+      )}
+
+      {/* Page tabs */}
+      <div className="filter-section">
+        <div className="filter-tabs">
+          {pageTabs.map((t) => (
+            <button key={t} className={`filter-tab ${(tab === 'upstream' && t === '上游产品') || (tab === 'local' && t === '本站产品') || (tab === 'diff' && t === '差异处理') || (tab === 'logs' && t === '同步日志') ? 'active' : ''}`}
+              onClick={() => { setTab(t === '上游产品' ? 'upstream' : t === '本站产品' ? 'local' : t === '差异处理' ? 'diff' : 'logs'); setSelected(new Set()); }}>
+              {t}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* === UPSTREAM TAB === */}
+      {tab === 'upstream' && (
+        <>
+          <div className="admin-upstream-status">
+            <div className="admin-upstream-status-item"><span>上游总数</span><strong>{upProducts.length}</strong></div>
+            <div className="admin-upstream-status-item"><span>已发布</span><strong>{publishedCount}</strong></div>
+            <div className="admin-upstream-status-item"><span>未发布</span><strong>{unpublishedCount}</strong></div>
+            <div className="admin-upstream-status-item"><span>待新增</span><strong className="text-green">{diff.new?.length || 0}</strong></div>
+            <div className="admin-upstream-status-item"><span>待变更</span><strong className="text-orange">{diff.changed?.length || 0}</strong></div>
+            <div className="admin-upstream-status-item"><span>待下架</span><strong className="text-red">{diff.offline?.length || 0}</strong></div>
+          </div>
+          <div className="admin-upstream-filters">
+            <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
+            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option><option value="offline">已下线</option></select>
+            <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
+          </div>
+          <DataTable pagination columns={['', '产品信息', '产品组/线路', '配置', '价格', '库存', '发布状态', '操作']}
+            rows={upProducts.filter(p => {
+              if (filterGroup && (p.areaGroup || '') !== filterGroup) return false;
+              if (filterStatus && p.status !== filterStatus) return false;
+              if (searchText) { const q = searchText.toLowerCase(); const h = [p.upstreamId, p.title, p.cpu, p.memory, p.disk, p.bandwidth, String(p.priceMonthly || ''), p.areaGroup, p.area, p.netline].join(' ').toLowerCase(); if (!h.includes(q)) return false; }
+              return true;
+            }).map(item => [
+              <input type="checkbox" checked={selected.has(item.upstreamId)} onChange={() => toggleSelect(item.upstreamId)} />,
+              <div className="admin-upstream-title"><strong>{item.title || '-'}</strong><small>ID: {item.upstreamId}</small></div>,
+              `${item.areaGroup || '-'} / ${item.area || ''}`,
+              `${item.cpu || '-'} / ${item.memory || '-'} / ${item.disk || '-'}`,
+              formatPrice(item.priceMonthly),
+              stockDisplay(item.stock),
+              item.published ? <span className="status-pill on_sale">已关联</span> : item.status === 'offline' ? <span className="status-pill off_sale">已下架</span> : <span className="status-pill expiring">未关联</span>,
+              <ActionGroup actions={[['详情', () => setDetailItem(item)], ['编辑', () => openEdit(item)], ...(item.status === 'on_sale' && !item.published ? [['合并', () => singleMerge(item, 'create')], ['忽略', () => singleMerge(item, 'ignore')]] : []), ['删除', () => openDeleteUpstream(item)]]} />
+            ])}
+          />
+          {selected.size > 0 && (
+            <div className="upstream-merge-actions">
+              <button className="primary" onClick={() => doMerge('create')} disabled={merging}>批量合并</button>
+              <button className="secondary" onClick={() => doMerge('ignore')} disabled={merging}>批量忽略</button>
+              <span className="muted">已选 {selected.size} 项</span>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* === LOCAL PRODUCTS TAB === */}
+      {tab === 'local' && (
+        <>
+          <Panel title="新增购买方案"><ProductFields form={form} setForm={setForm} submitLabel="新增" onSubmit={addProduct} /></Panel>
+          <DataTable pagination columns={['产品名称', '类型', '地区', '配置', '月付', '年付', '库存', '状态', '操作']}
+            rows={products.filter(p => [p.name, p.type, p.location, p.cpu, p.memory, p.disk, p.bandwidth, p.status].some(v => textIncludes(v, keyword))).map(p => [
+              p.name, p.type, p.location, `${p.cpu} / ${p.memory} / ${p.disk}`, formatMoney(p.priceMonthly), formatMoney(p.priceYearly), p.stock,
+              <StatusPill value={p.status} labels={productStatusLabels} />,
+              <ActionGroup actions={[['编辑', () => openProductEdit(p)], [p.status === 'on_sale' ? '下架' : '上架', () => updateProductStatus(p, p.status === 'on_sale' ? 'off_sale' : 'on_sale')]]} />
+            ])}
+          />
+        </>
+      )}
+
+      {/* === DIFF TAB === */}
+      {tab === 'diff' && (
+        <>
+          <div className="filter-section">
+            <div className="filter-tabs">
+              {tabs.map(([key, label, count]) => (
+                <button key={key} className={`filter-tab ${diffTab === key ? 'active' : ''}`} onClick={() => { setDiffTab(key); setSelected(new Set()); setFilterGroup(''); setFilterStatus(''); setSearchText(''); }}>
+                  {label} ({count})
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="admin-upstream-filters">
+            <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
+            {diffTab !== 'localOnly' && <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option></select>}
+            <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
+          </div>
+
+          {diffTab !== 'unchanged' && diffTab !== 'localOnly' && filtered.length > 0 && (
+            <div className="upstream-merge-actions">
+              {diffTab === 'new' && <button className="primary" onClick={() => doMerge('create')} disabled={merging}>批量合并</button>}
+              {diffTab === 'changed' && <button className="primary" onClick={() => doMerge('update')} disabled={merging}>批量更新</button>}
+              {diffTab === 'new' && <button className="secondary" onClick={() => doMerge('ignore')} disabled={merging}>批量忽略</button>}
+              {diffTab === 'offline' && <button className="primary" onClick={() => doMerge('offline')} disabled={merging}>批量下架</button>}
+              <span className="muted">已选 {selected.size} 项</span>
+            </div>
+          )}
+
+          {filtered.length > 0 ? (
+            <DataTable pagination columns={diffTab === 'localOnly' ? ['', '产品名称', '地区', '配置', '月付', '状态', '订单', '操作'] : ['', '产品信息', '产品组/线路', '配置', '价格', '状态', '操作']}
+              rows={filtered.map(item => {
+                const id = item.upstreamId || item.id;
+                const isLocal = diffTab === 'localOnly';
+                if (isLocal) {
+                  return [
+                    '', item.name || '-', item.location || '-', `${item.cpu} / ${item.memory} / ${item.disk}`, formatMoney(item.priceMonthly),
+                    <StatusPill value={item.status} labels={productStatusLabels} />,
+                    item.orders?.length || 0,
+                    <ActionGroup actions={[['编辑', () => editLocalProduct(item)], ['下架', () => openLocalProductAction(item, 'off_sale')], ...(item.orders?.length === 0 ? [['删除', () => openLocalProductAction(item, 'delete')]] : [])]} />
+                  ];
+                }
+                return [
+                  <input type="checkbox" checked={selected.has(id)} onChange={() => toggleSelect(id)} />,
+                  <div className="admin-upstream-title"><strong>{item.title || item.name || '-'}</strong><small>ID: {item.upstreamId || ''}</small></div>,
+                  `${item.areaGroup || item.location || '-'} / ${item.area || ''}`,
+                  `${item.cpu || '-'} / ${item.memory || '-'} / ${item.disk || '-'}`,
+                  formatPrice(item.priceMonthly),
+                  item.published ? <span className="status-pill on_sale">已发布</span> : item.status === 'offline' ? <span className="status-pill off_sale">已下线</span> : <span className="status-pill expiring">未发布</span>,
+                  <ActionGroup actions={[...(diffTab === 'new' ? [['合并', () => singleMerge(item, 'create')], ['忽略', () => singleMerge(item, 'ignore')]] : []), ...(diffTab === 'changed' ? [['更新', () => singleMerge(item, 'update')]] : []), ...(diffTab === 'offline' ? [['下架', () => singleMerge(item, 'offline')]] : [])]} />
+                ];
+              })}
+            />
+          ) : (
+            <div className="admin-upstream-empty"><p>{currentDiff.length === 0 ? (diffTab === 'new' ? '暂无新增，点击同步刷新。' : '暂无数据。') : '没有匹配筛选条件。'}</p></div>
+          )}
+        </>
+      )}
+
+      {/* === SYNC LOGS TAB === */}
+      {tab === 'logs' && (
+        <>
+          <h3 style={{ margin: '0 0 14px' }}>同步历史 (最近20次)</h3>
+          <DataTable pagination columns={['时间', '状态', '抓取', '新增', '变更', '下架', '错误', '日志']}
+            rows={syncRuns.map(run => [
+              formatDate(run.startedAt),
+              <span className={`status-pill ${run.status === 'success' ? 'on_sale' : run.status === 'running' ? 'expiring' : 'off_sale'}`}>{run.status}</span>,
+              run.fetchedCount, run.newCount, run.changedCount, run.offlineCount, run.errorCount || 0,
+              <button className="table-action" onClick={() => viewRunLogs(run.id)}>查看</button>
+            ])}
+          />
+        </>
+      )}
+
+      {/* === SHARED MODALS === */}
+      {detailItem && (
+        <Modal title="上游产品详情" onClose={() => setDetailItem(null)}>
+          <div className="admin-upstream-detail">
+            <div className="detail-grid">
+              <span>上游ID</span><strong>{detailItem.upstreamId}</strong>
+              <span>产品组</span><strong>{detailItem.areaGroup || '-'}</strong>
+              <span>区域/线路</span><strong>{detailItem.area || '-'} / {detailItem.netline || '-'}</strong>
+              <span>CPU</span><strong>{detailItem.cpu || '-'} x {detailItem.cpuCount || 1}</strong>
+              <span>内存</span><strong>{detailItem.memory || '-'}</strong>
+              <span>硬盘</span><strong>{detailItem.disk || '-'} / {detailItem.diskSn || ''}</strong>
+              <span>带宽</span><strong>{detailItem.bandwidth || '-'}</strong>
+              <span>月付</span><strong>{formatPrice(detailItem.priceMonthly)}</strong>
+              <span>库存</span><strong>{detailItem.stock === -1 ? '不限' : detailItem.stock}</strong>
+              <span>状态</span><StatusPill value={detailItem.status} labels={{ on_sale: '在售', off_sale: '下架', offline: '已下线' }} />
+              <span>关联产品</span><strong>{detailItem.productId || '未关联'}</strong>
+              <span>创建</span><strong>{formatDate(detailItem.createdAt)}</strong>
+            </div>
+            {detailItem.rawJson && (
+              <details style={{ marginTop: 14 }}><summary style={{ cursor: 'pointer', color: 'var(--muted)', fontSize: '0.85rem' }}>原始 JSON</summary>
+                <pre style={{ maxHeight: 200, overflow: 'auto', fontSize: '0.75rem', background: '#f8fafc', padding: 10, borderRadius: 6, marginTop: 8 }}>{(() => { try { return JSON.stringify(JSON.parse(detailItem.rawJson), null, 2); } catch { return detailItem.rawJson; } })()}</pre>
+              </details>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {(createOpen || editItem) && (
+        <Modal title={editItem ? '编辑上游产品' : '新增上游产品'} onClose={() => { setCreateOpen(false); setEditItem(null); }}>
+          <form className="modal-form" onSubmit={saveCrud}>
+            <fieldset><legend>基础信息</legend>
+              <label>标题<input value={crudForm.title} onChange={e => setCrudForm(p => ({ ...p, title: e.target.value }))} required /></label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>产品组<input value={crudForm.areaGroup} onChange={e => setCrudForm(p => ({ ...p, areaGroup: e.target.value }))} /></label><label>区域<input value={crudForm.area} onChange={e => setCrudForm(p => ({ ...p, area: e.target.value }))} /></label></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>线路<input value={crudForm.netline} onChange={e => setCrudForm(p => ({ ...p, netline: e.target.value }))} /></label><label>netDesc<input value={crudForm.netDesc} onChange={e => setCrudForm(p => ({ ...p, netDesc: e.target.value }))} /></label></div>
+            </fieldset>
+            <fieldset><legend>配置</legend>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>CPU型号<input value={crudForm.cpu} onChange={e => setCrudForm(p => ({ ...p, cpu: e.target.value }))} /></label><label>CPU数量<input type="number" value={crudForm.cpuCount} onChange={e => setCrudForm(p => ({ ...p, cpuCount: e.target.value }))} /></label></div>
+              <label>内存<input value={crudForm.memory} onChange={e => setCrudForm(p => ({ ...p, memory: e.target.value }))} /></label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}><label>硬盘容量<input value={crudForm.disk} onChange={e => setCrudForm(p => ({ ...p, disk: e.target.value }))} /></label><label>硬盘数量<input type="number" value={crudForm.diskNum} onChange={e => setCrudForm(p => ({ ...p, diskNum: e.target.value }))} /></label><label>硬盘类型<input value={crudForm.diskSn} onChange={e => setCrudForm(p => ({ ...p, diskSn: e.target.value }))} /></label></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>带宽<input value={crudForm.bandwidth} onChange={e => setCrudForm(p => ({ ...p, bandwidth: e.target.value }))} /></label><label>防御<input value={crudForm.defense} onChange={e => setCrudForm(p => ({ ...p, defense: e.target.value }))} /></label></div>
+            </fieldset>
+            <fieldset><legend>价格与库存</legend>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}><label>月付(分)<input type="number" value={crudForm.priceMonthly} onChange={e => setCrudForm(p => ({ ...p, priceMonthly: e.target.value }))} /></label><label>显示价格<input value={crudForm.priceShow} onChange={e => setCrudForm(p => ({ ...p, priceShow: e.target.value }))} /></label><label>库存(-1不限)<input type="number" value={crudForm.stock} onChange={e => setCrudForm(p => ({ ...p, stock: e.target.value }))} /></label></div>
+            </fieldset>
+            <fieldset><legend>状态</legend>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>状态<select value={crudForm.status} onChange={e => setCrudForm(p => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label><label>排序<input type="number" value={crudForm.sortOrder} onChange={e => setCrudForm(p => ({ ...p, sortOrder: e.target.value }))} /></label></div>
+            </fieldset>
+            <button className="primary" type="submit" disabled={crudSaving}>{crudSaving ? '保存中...' : (editItem ? '保存修改' : '新增产品')}</button>
+          </form>
+        </Modal>
+      )}
+
+      {deleteConfirm && (
+        <Modal title="确认操作" onClose={() => setDeleteConfirm(null)}>
+          <p>{deleteConfirm.productId ? '该上游产品已关联本站产品，建议下架。' : '确认删除此上游产品？'}</p>
+          <p className="muted">{deleteConfirm.title}</p>
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <button className="secondary" onClick={() => setDeleteConfirm(null)}>取消</button>
+            {deleteConfirm.productId && <button className="primary" onClick={() => { setDeleteConfirm(p => ({ ...p, action: 'unlink-delete' })); doDeleteUpstream(); }}>解绑后删除</button>}
+            <button className="secondary" onClick={() => { setDeleteConfirm(p => ({ ...p, action: 'offline' })); doDeleteUpstream(); }}>仅下架</button>
+            {!deleteConfirm.productId && <button className="primary" onClick={doDeleteUpstream} style={{ background: 'var(--red)' }}>确认删除</button>}
+          </div>
+        </Modal>
+      )}
+
+      {localProductAction && (
+        <Modal title={localProductAction.action === 'delete' ? '确认删除产品' : '确认下架产品'} onClose={() => setLocalProductAction(null)}>
+          <p><strong>{localProductAction.item.name}</strong></p>
+          {localProductAction.action === 'delete' && <p>该产品无关联订单，可以安全删除。</p>}
+          {localProductAction.action === 'off_sale' && <p>下架后产品将不在前台展示。</p>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
+            <button className="secondary" onClick={() => setLocalProductAction(null)}>取消</button>
+            <button className="primary" onClick={doLocalProductAction}>{localProductAction.action === 'delete' ? '确认删除' : '确认下架'}</button>
+          </div>
+        </Modal>
+      )}
+
+      {showSyncLogs && syncProgress && (
+        <Modal title={`同步日志 (${syncProgress.id?.slice(-8)})`} onClose={() => setShowSyncLogs(false)}>
+          <div className="admin-upstream-log-viewer">
+            <div className="sync-log-meta">
+              <span>状态: {syncProgress.status}</span>
+              <span>抓取: {syncProgress.fetchedCount || 0}</span>
+              <span>新增: {syncProgress.newCount || 0}</span>
+              {syncProgress.endedAt && <span>耗时: {Math.round((new Date(syncProgress.endedAt) - new Date(syncProgress.startedAt)) / 1000)}s</span>}
+            </div>
+            <div className="sync-log-list">
+              {syncLogs.map(log => (
+                <div key={log.id} className={`sync-log-line ${log.level}`}>
+                  <span className="sync-log-time">{new Date(log.createdAt).toLocaleTimeString('zh-HK', { hour12: false })}</span>
+                  <span className={`sync-log-level ${log.level}`}>{log.level}</span>
+                  <span className="sync-log-step">[{log.step}]</span>
+                  <span className="sync-log-msg">{log.message}</span>
+                </div>
+              ))}
+            </div>
+            <button className="table-action" style={{ marginTop: 10 }} onClick={async () => { try { setSyncLogs(await api(`/api/admin/upstream/fastmos/sync-runs/${syncProgress.id}/logs`)); } catch (_) {} }}>刷新</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

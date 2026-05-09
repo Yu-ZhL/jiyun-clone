@@ -743,6 +743,9 @@ export function createApp() {
   }));
 
   app.post('/api/admin/orders/:id/refund', requireAdmin, asyncRoute(async (req, res) => {
+    if (!req.body.confirm) {
+      return fail(res, 40055, '请确认退款操作');
+    }
     try {
       const result = await prisma.$transaction(async (tx) => {
         const order = await tx.order.findUnique({ where: { id: req.params.id }, include: { user: true } });
@@ -1196,7 +1199,12 @@ export function createApp() {
     const run = await prisma.upstreamSyncRun.create({
       data: { sourceId: source.id, status: 'running', startedAt: new Date() }
     });
-    const runId = run.id;
+    return syncFastmosProductsWithRun(run.id, source.id);
+  }
+
+  async function syncFastmosProductsWithRun(runId, sourceId) {
+    const source = await prisma.upstreamSource.findUnique({ where: { id: sourceId } });
+    if (!source) throw new Error('上游数据源不存在');
     const t0 = Date.now();
 
     const log = (level, step, msg, meta) => syncLog(runId, level, step, msg, meta);
@@ -1344,19 +1352,20 @@ export function createApp() {
   app.post('/api/admin/upstream/fastmos/sync', requireAdmin, asyncRoute(async (req, res) => {
     if (_syncing) {
       const current = await prisma.upstreamSyncRun.findFirst({ where: { status: 'running' }, orderBy: { startedAt: 'desc' } });
-      return fail(res, 40083, `已有同步任务正在执行 (runId: ${current?.id})`, 409);
+      return ok(res, { runId: current?.id, status: 'running', alreadyRunning: true });
     }
+    // Create run and return immediately, execute in background
+    const source = await ensureFastmosSource();
+    const run = await prisma.upstreamSyncRun.create({
+      data: { sourceId: source.id, status: 'running', startedAt: new Date() }
+    });
     _syncing = true;
-    try {
-      const result = await syncFastmosProducts();
-      const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
-      await logOperation(req, 'upstream_sync', 'upstream_source', source?.id, result);
-      ok(res, result);
-    } catch (error) {
-      fail(res, 50001, `同步失败: ${error.message}`, 502);
-    } finally {
-      _syncing = false;
-    }
+    // Background execution
+    syncFastmosProductsWithRun(run.id, source.id).catch((err) => {
+      console.error('[sync] background sync failed:', err.message);
+    }).finally(() => { _syncing = false; });
+    await logOperation(req, 'upstream_sync_start', 'upstream_source', source.id, { runId: run.id });
+    ok(res, { runId: run.id, status: 'running' });
   }));
 
   app.get('/api/admin/upstream/fastmos/sync-runs', requireAdmin, asyncRoute(async (_req, res) => {

@@ -119,7 +119,7 @@ if ($cancelled.payStatus -ne 'cancelled') { throw 'admin order cancel failed' }
 $refundOrder = Call-Api POST '/api/orders' @{ productId = $newProduct.id; cycle = 'monthly' } $userSession
 $refundPaid = Call-Api POST "/api/orders/$($refundOrder.id)/pay-with-balance" $null $userSession
 if ($refundPaid.payStatus -ne 'paid') { throw 'refund setup payment failed' }
-$refunded = Call-Api POST "/api/admin/orders/$($refundOrder.id)/refund" @{ remark = 'acceptance refund' } $adminSession
+$refunded = Call-Api POST "/api/admin/orders/$($refundOrder.id)/refund" @{ confirm = $true; remark = 'acceptance refund' } $adminSession
 if ($refunded.payStatus -ne 'refunded') { throw 'admin order refund failed' }
 
 $paid = Call-Api POST "/api/orders/$($order.id)/pay-with-balance" $null $userSession
