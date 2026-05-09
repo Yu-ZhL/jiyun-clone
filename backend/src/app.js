@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
@@ -234,7 +235,7 @@ export function createApp() {
 
   app.get('/api/site-settings', asyncRoute(async (_req, res) => {
     const rows = await prisma.systemSetting.findMany({
-      where: { key: { in: ['site_name', 'support_phone', 'support_email', 'copyright', 'hero_title', 'hero_subtitle'] } }
+      where: { key: { in: ['site_name', 'support_phone', 'support_email', 'copyright', 'hero_title', 'hero_subtitle', 'sales_contact_title', 'sales_contact_text', 'sales_contact_phone', 'sales_contact_wechat', 'sales_contact_qr_url'] } }
     });
     ok(res, Object.fromEntries(rows.map((row) => [row.key, row.value])));
   }));
@@ -919,12 +920,677 @@ export function createApp() {
     ok(res, result);
   }));
 
+  app.get('/api/fastmos/servers', asyncRoute(async (req, res) => {
+    const baseUrl = 'https://www.fastmos.com/host/get_data/get_buy_info';
+    const params = new URLSearchParams({
+      area_id: req.query.area_id || '0',
+      server_id: req.query.server_id || '0',
+      parent_id: req.query.parent_id || '0',
+      buy_type: req.query.buy_type || 'rent',
+      netline_id: req.query.netline_id || '0',
+      coupon_id: req.query.coupon_id || '0',
+      type: req.query.type || '',
+      use_point: req.query.use_point || '',
+      no_use_activity: req.query.no_use_activity || '0'
+    });
+    const response = await fetch(`${baseUrl}?${params.toString()}`, {
+      headers: {
+        'Accept': 'application/json, text/javascript, */*; q=0.01',
+        'X-Requested-With': 'XMLHttpRequest'
+      }
+    });
+    const text = await response.text();
+    try {
+      const upstream = JSON.parse(text);
+      if (upstream.code !== 0) {
+        return res.json({ code: upstream.code || 500, message: upstream.message || 'Fastmos 接口错误', data: null });
+      }
+      const { code: _code, ...data } = upstream;
+      ok(res, data);
+    } catch {
+      res.status(502).json({ code: 502, message: '上游接口返回异常', data: null });
+    }
+  }));
+
+  // ── Upstream Sync ──
+
+  const FASTMOS_BASE = 'https://www.fastmos.com/host/get_data/get_buy_info';
+
+  async function ensureFastmosSource() {
+    let source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
+    if (!source) {
+      source = await prisma.upstreamSource.create({
+        data: {
+          name: 'Fastmos',
+          apiUrl: FASTMOS_BASE,
+          defaultParams: JSON.stringify({ area_id: '0', server_id: '0', parent_id: '0', buy_type: 'rent', netline_id: '0' }),
+          status: 'active'
+        }
+      });
+    }
+    return source;
+  }
+
+  function stripHtml(html) {
+    if (!html) return '';
+    return String(html).replace(/<[^>]*>/g, '').trim();
+  }
+
+  function normHash(server, areaGroup, netlineNames) {
+    const cfg = server.server_config || {};
+    const price = server.price_show || '';
+    const raw = [
+      server.title || '',
+      areaGroup,
+      cfg.cpus_sn || '',
+      String(cfg.cpus || 1),
+      String(cfg.mem_start || 0),
+      String(cfg.disk || 0),
+      String(cfg.disk_num || 1),
+      cfg.disk_sn || '',
+      String(cfg.net || 0),
+      stripHtml(cfg.net_desc || ''),
+      cfg.def || '',
+      price,
+      String(server.stock ?? ''),
+      String(server.status || ''),
+      netlineNames
+    ].join('|');
+    return crypto.createHash('sha256').update(raw).digest('hex').slice(0, 16);
+  }
+
+  function parsePriceCents(priceShow) {
+    if (!priceShow) return null;
+    const num = parseFloat(String(priceShow).replace(/[^0-9.]/g, ''));
+    return Number.isFinite(num) ? Math.round(num * 100) : null;
+  }
+
+  // Returns { childAreaMap, parentNameByChildId, areaNetlineMap }
+  // - childAreaMap: childId → { name, parentId, netlineIds[] }
+  // - parentNameByChildId: childId → parentName
+  // - areaNetlineMap: areaId → netline name string
+  function buildAreaMaps(areaList, childAreaList, netlineList) {
+    // Build parent map (parent_id === '0')
+    const parentMap = {};
+    for (const a of (areaList || [])) {
+      if (String(a.parent_id || a.parent_id) === '0') {
+        parentMap[String(a.id)] = a.name || '';
+      }
+    }
+
+    // Build child area map
+    const childAreaMap = {};
+    const parentNameByChildId = {};
+    for (const a of (childAreaList || [])) {
+      const childId = String(a.id);
+      const parentId = String(a.parent_id || '0');
+      childAreaMap[childId] = {
+        name: a.name || '',
+        parentId,
+        netlineIds: (a.netline_ids || '').split(',').map((s) => s.trim()).filter(Boolean)
+      };
+      // Look up parent name
+      const parentName = parentMap[parentId] || '';
+      if (parentName) {
+        parentNameByChildId[childId] = parentName;
+      }
+    }
+
+    // Build netline map
+    const netlineNameById = {};
+    if (netlineList) {
+      if (Array.isArray(netlineList)) {
+        for (const n of netlineList) {
+          netlineNameById[String(n.id)] = n.name || '';
+        }
+      } else {
+        for (const [id, n] of Object.entries(netlineList)) {
+          netlineNameById[String(id)] = n.name || '';
+        }
+      }
+    }
+
+    // Build area→netline names
+    const areaNetlineMap = {};
+    for (const [childId, child] of Object.entries(childAreaMap)) {
+      const names = child.netlineIds.map((nid) => netlineNameById[nid] || '').filter(Boolean);
+      areaNetlineMap[childId] = names.join('/');
+    }
+
+    return { childAreaMap, parentNameByChildId, areaNetlineMap };
+  }
+
+  async function fetchFastmosOne(areaId = '0', parentId = '0', netlineId = '0') {
+    const params = new URLSearchParams({
+      area_id: areaId, server_id: '0', parent_id: parentId,
+      buy_type: 'rent', netline_id: netlineId, coupon_id: '0',
+      type: '', use_point: '', no_use_activity: '0'
+    });
+    const response = await fetch(`${FASTMOS_BASE}?${params.toString()}`, {
+      headers: { 'Accept': 'application/json, text/javascript, */*', 'X-Requested-With': 'XMLHttpRequest' }
+    });
+    if (!response.ok) throw new Error(`Fastmos 返回 HTTP ${response.status} (area=${areaId})`);
+    const text = await response.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      throw new Error(`Fastmos 接口返回非 JSON 数据 (area=${areaId})`);
+    }
+    if (data.code !== 0) throw new Error(`Fastmos 接口错误 (area=${areaId}): ${data.message || data.code}`);
+    return data;
+  }
+
+  async function fetchFastmosAll() {
+    // Step 1: get area catalog and default region servers
+    const catalog = await fetchFastmosOne('0', '0', '0');
+
+    // Identify parent areas (parent_id === '0' and status === '1')
+    const parentAreas = (catalog.area_list || []).filter(
+      (a) => String(a.parent_id || '0') === '0' && String(a.status || '1') === '1'
+    );
+
+    // Track all servers, child areas, and netlines
+    const allServers = [...(catalog.server_list || [])];
+    const seenServerIds = new Set(allServers.map((s) => String(s.id)));
+    const allChildAreas = [...(catalog.child_area_list || [])];
+    const seenChildIds = new Set(allChildAreas.map((c) => String(c.id)));
+    const allNetlineLists = { ...(catalog.netline_list || {}) };
+
+    // Step 2: iterate each parent area to discover child areas and first-child servers
+    for (const parent of parentAreas) {
+      try {
+        const data = await fetchFastmosOne(parent.id, '0', '0');
+
+        // Merge child areas
+        for (const child of (data.child_area_list || [])) {
+          const cid = String(child.id);
+          if (!seenChildIds.has(cid)) {
+            seenChildIds.add(cid);
+            allChildAreas.push(child);
+          }
+        }
+
+        // Merge servers from this parent call
+        for (const server of (data.server_list || [])) {
+          const sid = String(server.id);
+          if (!seenServerIds.has(sid)) {
+            seenServerIds.add(sid);
+            allServers.push(server);
+          }
+        }
+
+        // Merge netline lists
+        if (data.netline_list) {
+          if (Array.isArray(data.netline_list)) {
+            for (const n of data.netline_list) {
+              allNetlineLists[String(n.id)] = n;
+            }
+          } else {
+            Object.assign(allNetlineLists, data.netline_list);
+          }
+        }
+      } catch (err) {
+        console.warn(`Fastmos sync: skipping parent area ${parent.id} (${parent.name}): ${err.message}`);
+      }
+    }
+
+    // Step 3: iterate each child area to get all servers per variant
+    for (const child of allChildAreas) {
+      // Skip child areas that are unlikely to have servers
+      if (String(child.status || '1') !== '1') continue;
+
+      try {
+        const data = await fetchFastmosOne(child.id, child.parent_id || '0', '0');
+
+        // Merge servers
+        for (const server of (data.server_list || [])) {
+          const sid = String(server.id);
+          if (!seenServerIds.has(sid)) {
+            seenServerIds.add(sid);
+            allServers.push(server);
+          }
+        }
+
+        // Merge any new netlines
+        if (data.netline_list) {
+          if (Array.isArray(data.netline_list)) {
+            for (const n of data.netline_list) {
+              if (!allNetlineLists[String(n.id)]) {
+                allNetlineLists[String(n.id)] = n;
+              }
+            }
+          } else {
+            for (const [k, v] of Object.entries(data.netline_list)) {
+              if (!allNetlineLists[k]) allNetlineLists[k] = v;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`Fastmos sync: skipping child area ${child.id} (${child.name}): ${err.message}`);
+      }
+    }
+
+    return {
+      area_list: catalog.area_list,
+      child_area_list: allChildAreas,
+      server_list: allServers,
+      netline_list: allNetlineLists
+    };
+  }
+
+  // ── Reusable sync function (used by admin API and auto-startup) ──
+
+  async function syncFastmosProducts() {
+    const source = await ensureFastmosSource();
+    const run = await prisma.upstreamSyncRun.create({
+      data: { sourceId: source.id, status: 'running', startedAt: new Date() }
+    });
+
+    try {
+      const upstream = await fetchFastmosAll();
+      const { childAreaMap, parentNameByChildId, areaNetlineMap } = buildAreaMaps(
+        upstream.area_list, upstream.child_area_list, upstream.netline_list
+      );
+      const servers = upstream.server_list || [];
+      const currentUpstreamIds = new Set();
+
+      let newCount = 0;
+      let changedCount = 0;
+
+      for (const server of servers) {
+        const upstreamId = String(server.id);
+        currentUpstreamIds.add(upstreamId);
+        const cfg = server.server_config || {};
+        const childId = String(server.default_area_id || '');
+        const childInfo = childAreaMap[childId] || {};
+        const areaGroup = parentNameByChildId[childId] || childInfo.name || null;
+        const area = childInfo.name || null;
+        const netline = areaNetlineMap[childId] || null;
+        const priceMonthly = parsePriceCents(server.price_show);
+
+        const data = {
+          sourceId: source.id,
+          upstreamId,
+          title: server.title || '',
+          areaGroup,
+          area,
+          areaId: childId,
+          netline,
+          netDesc: stripHtml(cfg.net_desc || '') || null,
+          cpu: cfg.cpus_sn || null,
+          cpuCount: parseInt(cfg.cpus, 10) || null,
+          memory: cfg.mem_start ? `${cfg.mem_start}MB` : null,
+          disk: cfg.disk ? `${cfg.disk}GB` : null,
+          diskNum: parseInt(cfg.disk_num, 10) || null,
+          diskSn: cfg.disk_sn || null,
+          bandwidth: cfg.net ? `${cfg.net}M` : null,
+          defense: cfg.def || null,
+          priceMonthly,
+          priceShow: server.price_show || null,
+          priceConfig: server.price_config ? JSON.stringify(server.price_config) : null,
+          stock: parseInt(server.stock, 10) || 0,
+          status: server.status === '1' || server.on_sale === '1' ? 'on_sale' : 'off_sale',
+          sortOrder: parseInt(server.sort, 10) || 0,
+          rawJson: JSON.stringify(server),
+          normHash: normHash(server, areaGroup, netline)
+        };
+
+        const existing = await prisma.upstreamServerProduct.findUnique({
+          where: { sourceId_upstreamId: { sourceId: source.id, upstreamId } }
+        });
+
+        if (!existing) {
+          await prisma.upstreamServerProduct.create({ data });
+          newCount++;
+        } else if (existing.normHash !== data.normHash) {
+          await prisma.upstreamServerProduct.update({
+            where: { id: existing.id },
+            data: { ...data, published: existing.published, productId: existing.productId }
+          });
+          changedCount++;
+        } else {
+          await prisma.upstreamServerProduct.update({
+            where: { id: existing.id },
+            data: { stock: data.stock, netDesc: data.netDesc, status: data.status, priceMonthly: data.priceMonthly, priceShow: data.priceShow, sortOrder: data.sortOrder, rawJson: data.rawJson }
+          });
+        }
+      }
+
+      // Mark products that disappeared from upstream as offline
+      const allExisting = await prisma.upstreamServerProduct.findMany({ where: { sourceId: source.id } });
+      let offlineCount = 0;
+      for (const p of allExisting) {
+        if (!currentUpstreamIds.has(p.upstreamId) && p.status !== 'offline') {
+          await prisma.upstreamServerProduct.update({ where: { id: p.id }, data: { status: 'offline' } });
+          offlineCount++;
+        }
+      }
+
+      const endedAt = new Date();
+      await prisma.upstreamSyncRun.update({
+        where: { id: run.id },
+        data: { status: 'success', endedAt, fetchedCount: servers.length, newCount, changedCount, offlineCount }
+      });
+
+      await prisma.upstreamSource.update({ where: { id: source.id }, data: { lastSyncAt: endedAt } });
+
+      return { runId: run.id, fetched: servers.length, new: newCount, changed: changedCount, offline: offlineCount };
+    } catch (error) {
+      await prisma.upstreamSyncRun.update({
+        where: { id: run.id },
+        data: { status: 'failed', endedAt: new Date(), errorMessage: error.message, errorCount: 1 }
+      });
+      throw error;
+    }
+  }
+
+  app.post('/api/admin/upstream/fastmos/sync', requireAdmin, asyncRoute(async (req, res) => {
+    try {
+      const result = await syncFastmosProducts();
+      const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
+      await logOperation(req, 'upstream_sync', 'upstream_source', source?.id, result);
+      ok(res, result);
+    } catch (error) {
+      fail(res, 50001, `同步失败: ${error.message}`, 502);
+    }
+  }));
+
+  app.get('/api/admin/upstream/fastmos/products', requireAdmin, asyncRoute(async (_req, res) => {
+    const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
+    if (!source) return ok(res, []);
+    const products = await prisma.upstreamServerProduct.findMany({
+      where: { sourceId: source.id },
+      include: { product: true },
+      orderBy: [{ areaGroup: 'asc' }, { sortOrder: 'asc' }]
+    });
+    ok(res, products);
+  }));
+
+  app.get('/api/admin/upstream/fastmos/diff', requireAdmin, asyncRoute(async (_req, res) => {
+    const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
+    if (!source) return ok(res, { new: [], changed: [], offline: [], unchanged: [], localOnly: [] });
+
+    const upstreamProducts = await prisma.upstreamServerProduct.findMany({
+      where: { sourceId: source.id },
+      include: { product: true }
+    });
+
+    const newItems = upstreamProducts.filter((p) => !p.productId && p.status === 'on_sale');
+    const changedItems = upstreamProducts.filter((p) => p.productId && p.status === 'on_sale' && !p.published);
+    const offlineItems = upstreamProducts.filter((p) => p.status === 'offline' && p.productId);
+    const unchangedItems = upstreamProducts.filter((p) => p.productId && p.published);
+    const localOnly = await prisma.product.findMany({
+      where: { upstreamProduct: null },
+      include: { orders: { select: { id: true } }, servers: { select: { id: true } } }
+    });
+
+    ok(res, { new: newItems, changed: changedItems, offline: offlineItems, unchanged: unchangedItems, localOnly });
+  }));
+
+  app.post('/api/admin/upstream/fastmos/merge', requireAdmin, asyncRoute(async (req, res) => {
+    const { action, upstreamIds } = req.body;
+    if (!action || !upstreamIds || !Array.isArray(upstreamIds)) {
+      return fail(res, 40060, '请提供 action 和 upstreamIds 数组');
+    }
+
+    const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
+    if (!source) return fail(res, 40407, '上游数据源不存在', 404);
+
+    const results = { created: 0, updated: 0, ignored: 0, offlined: 0 };
+
+    for (const upstreamId of upstreamIds) {
+      const usp = await prisma.upstreamServerProduct.findUnique({
+        where: { sourceId_upstreamId: { sourceId: source.id, upstreamId: String(upstreamId) } }
+      });
+      if (!usp) continue;
+
+      if (action === 'create') {
+        const productData = {
+          name: usp.title || `${usp.areaGroup || ''} ${usp.cpu || ''}`.trim(),
+          type: '服务器租用',
+          location: usp.areaGroup || usp.area || '',
+          cpu: `${usp.cpu || '-'}${usp.cpuCount ? ` x ${usp.cpuCount}` : ''}`,
+          memory: usp.memory || '-',
+          disk: `${usp.disk || '-'}${usp.diskNum ? ` x ${usp.diskNum}` : ''} ${usp.diskSn || ''}`.trim(),
+          bandwidth: usp.bandwidth || '-',
+          defense: usp.defense || '-',
+          priceMonthly: usp.priceMonthly || 0,
+          priceYearly: usp.priceMonthly ? usp.priceMonthly * 10 : 0,
+          stock: usp.stock || 0,
+          status: 'on_sale',
+          sortOrder: usp.sortOrder || 0
+        };
+        const product = await prisma.product.create({ data: productData });
+        await prisma.upstreamServerProduct.update({
+          where: { id: usp.id },
+          data: { productId: product.id, published: true }
+        });
+        results.created++;
+      } else if (action === 'update') {
+        if (!usp.productId) continue;
+        await prisma.product.update({
+          where: { id: usp.productId },
+          data: {
+            name: usp.title || undefined,
+            cpu: `${usp.cpu || '-'}${usp.cpuCount ? ` x ${usp.cpuCount}` : ''}`,
+            memory: usp.memory || '-',
+            disk: `${usp.disk || '-'}${usp.diskNum ? ` x ${usp.diskNum}` : ''} ${usp.diskSn || ''}`.trim(),
+            bandwidth: usp.bandwidth || '-',
+            defense: usp.defense || '-',
+            priceMonthly: usp.priceMonthly || 0,
+            priceYearly: usp.priceMonthly ? usp.priceMonthly * 10 : 0,
+            stock: usp.stock || 0,
+            status: usp.status === 'on_sale' ? 'on_sale' : 'off_sale'
+          }
+        });
+        await prisma.upstreamServerProduct.update({
+          where: { id: usp.id },
+          data: { published: true }
+        });
+        results.updated++;
+      } else if (action === 'ignore') {
+        await prisma.upstreamServerProduct.update({
+          where: { id: usp.id },
+          data: { published: true }
+        });
+        results.ignored++;
+      } else if (action === 'offline') {
+        if (usp.productId) {
+          const orderCount = await prisma.order.count({ where: { productId: usp.productId } });
+          if (orderCount > 0) {
+            await prisma.product.update({ where: { id: usp.productId }, data: { status: 'off_sale' } });
+          } else {
+            await prisma.product.delete({ where: { id: usp.productId } });
+          }
+        }
+        await prisma.upstreamServerProduct.update({
+          where: { id: usp.id },
+          data: { status: 'offline', published: false, productId: null }
+        });
+        results.offlined++;
+      }
+    }
+
+    await logOperation(req, 'upstream_merge', 'upstream_source', source.id, { action, count: upstreamIds.length, ...results });
+    ok(res, results);
+  }));
+
+  // ── Public server products (published upstream products for frontend) ──
+
+  app.get('/api/server-products', asyncRoute(async (_req, res) => {
+    const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
+    if (!source) return ok(res, { groups: [], areas: [], products: [], needsSync: true });
+
+    const totalCount = await prisma.upstreamServerProduct.count({ where: { sourceId: source.id } });
+    if (totalCount === 0) return ok(res, { groups: [], areas: [], products: [], needsSync: true });
+
+    const upstreamProducts = await prisma.upstreamServerProduct.findMany({
+      where: { sourceId: source.id, status: 'on_sale' },
+      orderBy: [{ areaGroup: 'asc' }, { sortOrder: 'asc' }]
+    });
+
+    // Build grouped structure for tabs
+    const groupSet = new Map();
+    const areaSet = new Map();
+    // Sort order for product groups
+    const groupPriority = {
+      '香港产品组': 1, '美国产品组': 2, '日本產品組': 3,
+      '新加坡服务器': 4, '马来西亚服务器': 5, '韩国产品组': 6,
+      '台湾产品组': 7, '東南亞產品組': 8, '站群服務器': 9,
+      '宿主机产品组': 10, '显卡产品组': 11
+    };
+    const groupSort = (g) => groupPriority[g] || 99;
+
+    const products = upstreamProducts.map((usp) => {
+      const group = usp.areaGroup || '其他';
+      const area = usp.area || '默认';
+      const netline = usp.netline || '';
+
+      if (!groupSet.has(group)) groupSet.set(group, { name: group, id: group });
+      const areaKey = `${group}::${area}::${netline}`;
+      if (!areaSet.has(areaKey)) areaSet.set(areaKey, { name: netline || area, id: areaKey, group, area, netline });
+
+      return {
+        id: usp.upstreamId,
+        productId: usp.productId,
+        published: usp.published,
+        title: usp.title,
+        areaGroup: group,
+        area,
+        areaKey,
+        netline,
+        netDesc: usp.netDesc,
+        cpu: usp.cpu,
+        cpuCount: usp.cpuCount,
+        memory: usp.memory,
+        disk: usp.disk,
+        diskNum: usp.diskNum,
+        diskSn: usp.diskSn,
+        bandwidth: usp.bandwidth,
+        defense: usp.defense,
+        priceMonthly: usp.priceMonthly,
+        priceShow: usp.priceShow,
+        stock: usp.stock,
+        status: usp.status
+      };
+    });
+
+    ok(res, {
+      groups: Array.from(groupSet.values()).sort((a, b) => groupSort(a.name) - groupSort(b.name)),
+      areas: Array.from(areaSet.values()).sort((a, b) => groupSort(a.group) - groupSort(b.group)),
+      products
+    });
+  }));
+
+  // ── Clean up test business data ──
+
+  const CLEANUP_CONFIRM = 'CLEAR_TEST_BUSINESS_DATA';
+
+  app.post('/api/admin/maintenance/cleanup-test-business-data', requireAdmin, asyncRoute(async (req, res) => {
+    const dryRun = req.body.dryRun !== false;
+    const confirm = req.body.confirm || '';
+
+    const counts = {
+      Renewal: await prisma.renewal.count(),
+      Server: await prisma.server.count(),
+      Notification: await prisma.notification.count(),
+      WalletTransaction: await prisma.walletTransaction.count(),
+      TicketReply: await prisma.ticketReply.count(),
+      Ticket: await prisma.ticket.count(),
+      ImpersonationToken: await prisma.impersonationToken.count(),
+      Order: await prisma.order.count()
+    };
+
+    if (dryRun) {
+      return ok(res, { dryRun: true, counts });
+    }
+
+    if (confirm !== CLEANUP_CONFIRM) {
+      return fail(res, 40070, `请提供正确的确认码 "${CLEANUP_CONFIRM}"`);
+    }
+
+    // Delete in FK-safe order
+    const deleted = {};
+    const tx = await prisma.$transaction([
+      prisma.renewal.deleteMany(),
+      prisma.server.deleteMany(),
+      prisma.notification.deleteMany(),
+      prisma.walletTransaction.deleteMany(),
+      prisma.ticketReply.deleteMany(),
+      prisma.ticket.deleteMany(),
+      prisma.impersonationToken.deleteMany(),
+      prisma.order.deleteMany()
+    ]);
+    deleted.Renewal = tx[0].count;
+    deleted.Server = tx[1].count;
+    deleted.Notification = tx[2].count;
+    deleted.WalletTransaction = tx[3].count;
+    deleted.TicketReply = tx[4].count;
+    deleted.Ticket = tx[5].count;
+    deleted.ImpersonationToken = tx[6].count;
+    deleted.Order = tx[7].count;
+
+    await logOperation(req, 'cleanup_test_business_data', 'system', null, { deleted, dryRun: false });
+
+    ok(res, { dryRun: false, counts: deleted });
+  }));
+
+  app.post('/api/admin/products/cleanup-test', requireAdmin, asyncRoute(async (req, res) => {
+    const testIds = ['seed-1', 'seed-2', 'seed-3'];
+    let hardDeleted = 0;
+    let offlined = 0;
+
+    for (const id of testIds) {
+      const product = await prisma.product.findUnique({ where: { id } });
+      if (!product) continue;
+      const orderCount = await prisma.order.count({ where: { productId: id } });
+      if (orderCount > 0) {
+        await prisma.product.update({ where: { id }, data: { status: 'off_sale' } });
+        offlined++;
+      } else {
+        await prisma.product.delete({ where: { id } });
+        hardDeleted++;
+      }
+    }
+
+    await logOperation(req, 'cleanup_test_products', 'product', null, { hardDeleted, offlined });
+    ok(res, { hardDeleted, offlined, message: `清理完成：硬删除 ${hardDeleted} 个，下架 ${offlined} 个` });
+  }));
+
   app.use('/api', (_req, res) => fail(res, 40400, 'API endpoint not found', 404));
 
   app.use((error, _req, res, _next) => {
     console.error(error);
     fail(res, 50000, error.message || '服务器错误', 500);
   });
+
+  // ── Auto-sync on first startup (empty upstream table) ──
+  setTimeout(async () => {
+    try {
+      const count = await prisma.upstreamServerProduct.count();
+      if (count === 0) {
+        console.log('[auto-sync] Upstream table empty, triggering initial sync...');
+        const result = await syncFastmosProducts();
+        console.log(`[auto-sync] Initial sync complete: fetched=${result.fetched} new=${result.new}`);
+      }
+    } catch (error) {
+      console.error('[auto-sync] Initial sync failed:', error.message);
+      // Record failed run
+      try {
+        const source = await ensureFastmosSource();
+        await prisma.upstreamSyncRun.create({
+          data: {
+            sourceId: source.id,
+            status: 'failed',
+            endedAt: new Date(),
+            errorMessage: `Auto-sync: ${error.message}`,
+            errorCount: 1
+          }
+        });
+      } catch (_) { /* don't fail startup */ }
+    }
+  }, 3000);
 
   return app;
 }

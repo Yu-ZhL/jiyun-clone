@@ -36,61 +36,33 @@ async function main() {
     }
   });
 
-  const products = [
-    {
-      name: '香港 BGP 云服务器',
-      type: '云服务器',
-      location: '中国香港',
-      cpu: '4 vCPU',
-      memory: '8 GB',
-      disk: '120 GB SSD',
-      bandwidth: '20M CN2/BGP',
-      defense: '50G 防护',
-      priceMonthly: cents(60),
-      priceYearly: cents(600),
-      stock: 30,
-      sortOrder: 1,
-      description: '适合企业官网、跨境电商和轻量业务。'
-    },
-    {
-      name: '香港独立服务器 E5',
-      type: '服务器租用',
-      location: 'HK T3+ 数据中心',
-      cpu: 'E5-2680 v4',
-      memory: '32 GB',
-      disk: '1 TB SSD',
-      bandwidth: '30M 独享',
-      defense: '100G 防护',
-      priceMonthly: cents(360),
-      priceYearly: cents(3600),
-      stock: 8,
-      sortOrder: 2,
-      description: '独享硬件资源，适合高负载业务。'
-    },
-    {
-      name: '1U 服务器托管',
-      type: '服务器托管',
-      location: '中国香港',
-      cpu: '自带设备',
-      memory: '1U 机位',
-      disk: '双路电力',
-      bandwidth: '10M 独享',
-      defense: '基础清洗',
-      priceMonthly: cents(500),
-      priceYearly: cents(5000),
-      stock: 12,
-      sortOrder: 3,
-      description: '香港机房标准机位、电力与带宽托管。'
+  // No more seed demo products — products now come from upstream sync.
+  // Clean up legacy seed products that have no orders.
+  const seedIds = ['seed-1', 'seed-2', 'seed-3'];
+  for (const id of seedIds) {
+    const product = await prisma.product.findUnique({ where: { id } });
+    if (product) {
+      const orderCount = await prisma.order.count({ where: { productId: id } });
+      if (orderCount === 0) {
+        await prisma.product.delete({ where: { id } }).catch(() => {});
+      } else {
+        await prisma.product.update({ where: { id }, data: { status: 'off_sale' } }).catch(() => {});
+      }
     }
-  ];
-
-  for (const product of products) {
-    await prisma.product.upsert({
-      where: { id: `seed-${product.sortOrder}` },
-      update: product,
-      create: { id: `seed-${product.sortOrder}`, ...product }
-    });
   }
+
+  // Seed default upstream source
+  await prisma.upstreamSource.upsert({
+    where: { id: 'upstream-fastmos' },
+    update: { apiUrl: 'https://www.fastmos.com/host/get_data/get_buy_info' },
+    create: {
+      id: 'upstream-fastmos',
+      name: 'Fastmos',
+      apiUrl: 'https://www.fastmos.com/host/get_data/get_buy_info',
+      defaultParams: JSON.stringify({ area_id: '0', server_id: '0', parent_id: '0', buy_type: 'rent', netline_id: '0' }),
+      status: 'active'
+    }
+  });
 
   const settings = {
     site_name: '极云主机管理系统',
@@ -101,7 +73,13 @@ async function main() {
     hero_subtitle: 'T3+ 安全数据中心，BGP 国际多线与 CN2 线路，适合企业网站、电商和跨境业务。',
     registration_enabled: 'true',
     expiry_remind_days: process.env.EXPIRY_REMIND_DAYS || '7',
-    overdue_suspend_days: process.env.OVERDUE_SUSPEND_DAYS || '3'
+    overdue_suspend_days: process.env.OVERDUE_SUSPEND_DAYS || '3',
+    sales_contact_title: '联系客服开通服务器',
+    sales_contact_text: '请通过以下方式联系客服，我们将为您开通所需服务器配置。',
+    sales_contact_phone: '+852 800-888-888',
+    sales_contact_wechat: 'jiyun_support',
+    sales_contact_qr_url: '',
+    operation_log_retention_days: '90'
   };
 
   for (const [key, value] of Object.entries(settings)) {

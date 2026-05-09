@@ -42,25 +42,94 @@ model User {
 }
 
 model Product {
-  id           String   @id @default(cuid())
-  name         String
-  type         String
-  location     String
-  cpu          String
-  memory       String
-  disk         String
-  bandwidth    String
-  defense      String
-  priceMonthly Int
-  priceYearly  Int
-  stock        Int      @default(0)
-  status       String   @default("on_sale")
-  sortOrder    Int      @default(0)
-  description  String?  @db.Text
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-  orders       Order[]
-  servers      Server[]
+  id              String                  @id @default(cuid())
+  name            String
+  type            String
+  location        String
+  cpu             String
+  memory          String
+  disk            String
+  bandwidth       String
+  defense         String
+  priceMonthly    Int
+  priceYearly     Int
+  stock           Int                     @default(0)
+  status          String                  @default("on_sale")
+  sortOrder       Int                     @default(0)
+  description     String?                 @db.Text
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  orders          Order[]
+  servers         Server[]
+  upstreamProduct UpstreamServerProduct?
+}
+
+model UpstreamSource {
+  id            String                  @id @default(cuid())
+  name          String
+  apiUrl        String
+  defaultParams String?                 @db.Text
+  status        String                  @default("active")
+  lastSyncAt    DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  products      UpstreamServerProduct[]
+  syncRuns      UpstreamSyncRun[]
+}
+
+model UpstreamServerProduct {
+  id           String          @id @default(cuid())
+  sourceId     String
+  upstreamId   String
+  title        String
+  areaGroup    String?
+  area         String?
+  areaId       String?
+  netline      String?
+  netDesc       String?
+  cpu           String?
+  cpuCount     Int?
+  memory       String?
+  disk         String?
+  diskNum      Int?
+  diskSn       String?
+  bandwidth    String?
+  defense      String?
+  priceMonthly Int?
+  priceShow    String?
+  priceConfig  String?         @db.Text
+  stock        Int?
+  status       String?
+  sortOrder    Int             @default(0)
+  rawJson      String?         @db.Text
+  normHash     String?
+  published    Boolean         @default(false)
+  productId    String?         @unique
+  source       UpstreamSource  @relation(fields: [sourceId], references: [id])
+  product      Product?        @relation(fields: [productId], references: [id])
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([sourceId, upstreamId])
+  @@index([sourceId])
+}
+
+model UpstreamSyncRun {
+  id           String         @id @default(cuid())
+  sourceId     String
+  status       String
+  startedAt    DateTime       @default(now())
+  endedAt      DateTime?
+  fetchedCount Int            @default(0)
+  newCount     Int            @default(0)
+  changedCount Int            @default(0)
+  offlineCount Int            @default(0)
+  errorCount   Int            @default(0)
+  errorMessage String?        @db.Text
+  source       UpstreamSource @relation(fields: [sourceId], references: [id])
+  createdAt    DateTime       @default(now())
+
+  @@index([sourceId])
 }
 
 model Order {

@@ -88,12 +88,22 @@ export async function cleanupExpiredTokens(prisma) {
   return { cleaned: cleaned.count };
 }
 
+export async function cleanupOldOperationLogs(prisma) {
+  const retentionDays = await settingInt(prisma, 'operation_log_retention_days', 90);
+  const cutoff = new Date(Date.now() - retentionDays * dayMs);
+  const deleted = await prisma.operationLog.deleteMany({
+    where: { createdAt: { lt: cutoff } }
+  });
+  return { deleted: deleted.count };
+}
+
 export async function runAllJobs(prisma) {
-  const [expiring, expired, orders, tokens] = await Promise.all([
+  const [expiring, expired, orders, tokens, logs] = await Promise.all([
     scanExpiringServers(prisma),
     scanExpiredServers(prisma),
     cancelExpiredOrders(prisma),
-    cleanupExpiredTokens(prisma)
+    cleanupExpiredTokens(prisma),
+    cleanupOldOperationLogs(prisma)
   ]);
-  return { expiring, expired, orders, tokens };
+  return { expiring, expired, orders, tokens, logs };
 }
