@@ -1349,24 +1349,9 @@ export function createApp() {
     }
   }
 
-  app.post('/api/admin/upstream/fastmos/sync', requireAdmin, asyncRoute(async (req, res) => {
-    if (_syncing) {
-      const current = await prisma.upstreamSyncRun.findFirst({ where: { status: 'running' }, orderBy: { startedAt: 'desc' } });
-      return ok(res, { runId: current?.id, status: 'running', alreadyRunning: true });
-    }
-    // Create run and return immediately, execute in background
-    const source = await ensureFastmosSource();
-    const run = await prisma.upstreamSyncRun.create({
-      data: { sourceId: source.id, status: 'running', startedAt: new Date() }
-    });
-    _syncing = true;
-    // Background execution
-    syncFastmosProductsWithRun(run.id, source.id).catch((err) => {
-      console.error('[sync] background sync failed:', err.message);
-    }).finally(() => { _syncing = false; });
-    await logOperation(req, 'upstream_sync_start', 'upstream_source', source.id, { runId: run.id });
-    ok(res, { runId: run.id, status: 'running' });
-  }));
+  app.post('/api/admin/upstream/fastmos/sync', requireAdmin, (_req, res) => {
+    res.status(410).json({ code: 410, message: '旧同步接口已废弃，请使用 POST /api/admin/upstream/fastmos/fetch-preview', data: null });
+  });
 
   app.get('/api/admin/upstream/fastmos/sync-runs', requireAdmin, asyncRoute(async (_req, res) => {
     const runs = await prisma.upstreamSyncRun.findMany({

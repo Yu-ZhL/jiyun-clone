@@ -99,7 +99,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   const syncUpstream = async () => {
     setSyncing(true);
     try {
-      const result = await api('/api/admin/upstream/fastmos/sync', { method: 'POST' });
+      const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
       setNotice(`同步完成：${result.fetched} 台，新增 ${result.new}，变更 ${result.changed}，下架 ${result.offline}`);
       await Promise.all([loadUpstreamSummary(), load()]);
     } catch (e) { setNotice(e.message); }
@@ -490,7 +490,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
             <form className="modal-form" onSubmit={submitUserEdit}>
               <label>邮箱<input value={userForm.email} onChange={(event) => setUserForm((prev) => ({ ...prev, email: event.target.value }))} required /></label>
               <label>电话<input value={userForm.phone} onChange={(event) => setUserForm((prev) => ({ ...prev, phone: event.target.value }))} /></label>
-              <label>状态<select value={userForm.status} onChange={(event) => setUserForm((prev) => ({ ...prev, status: event.target.value }))}><option value="active">正常</option><option value="disabled">已禁用</option></select></label>
+              <label>状态<select className="admin-select" value={userForm.status} onChange={(event) => setUserForm((prev) => ({ ...prev, status: event.target.value }))}><option value="active">正常</option><option value="disabled">已禁用</option></select></label>
               <button className="primary" type="submit">保存用户</button>
             </form>
           </Modal>
@@ -509,7 +509,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
               <label>登录用户<input value={serverEditForm.values.loginUser || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginUser: event.target.value } }))} /></label>
               <label>新密码<input type="password" value={serverEditForm.values.loginPassword || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginPassword: event.target.value } }))} placeholder="不填写则不修改" /></label>
               <label>面板地址<input value={serverEditForm.values.panelUrl || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, panelUrl: event.target.value } }))} /></label>
-              <label>状态<select value={serverEditForm.values.status || 'running'} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: event.target.value } }))}><option value="running">运行中</option><option value="suspended">已暂停</option><option value="expired">已到期</option><option value="expiring">即将到期</option></select></label>
+              <label>状态<select className="admin-select" value={serverEditForm.values.status || 'running'} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: event.target.value } }))}><option value="running">运行中</option><option value="suspended">已暂停</option><option value="expired">已到期</option><option value="expiring">即将到期</option></select></label>
               <label>到期时间<input type="date" value={serverEditForm.values.expiresAt || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, expiresAt: event.target.value } }))} /></label>
               <button className="primary" type="submit">保存服务器</button>
             </form>
@@ -663,21 +663,30 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
   const syncUpstream = async () => {
     _setSyncing2(true);
     setSyncProgress(null); setSyncLogs([]);
+    // Clear any old poller
+    if (syncPoller) clearInterval(syncPoller);
     try {
       const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
       if (result.runId) {
-        setSyncProgress({ id: result.runId, status: 'running', startedAt: new Date().toISOString() });
-        setNotice('同步已启动，正在后台执行...');
-        // Poll every 2s
+        const runId = result.runId;
+        setSyncProgress({ id: runId, status: 'running', startedAt: new Date().toISOString() });
+        setNotice('获取任务已启动，正在后台拉取上游数据...');
         const timer = setInterval(async () => {
           try {
-            const cur = await api('/api/admin/upstream/fastmos/sync-current');
-            if (cur) {
-              setSyncProgress(cur.run);
-              setSyncLogs(cur.logs || []);
-              if (cur.run?.status !== 'running') {
+            const run = await api(`/api/admin/upstream/fastmos/sync-runs/${runId}`);
+            const logs = await api(`/api/admin/upstream/fastmos/sync-runs/${runId}/logs`);
+            if (run) {
+              setSyncProgress(run);
+              setSyncLogs(logs || []);
+              const done = ['pending_review', 'success', 'failed', 'cancelled'].includes(run.status);
+              if (done) {
                 clearInterval(timer); _setSyncing2(false);
-                setNotice(`上游数据获取完成：${cur.run?.fetchedCount || 0} 台，待审核`);
+                if (run.status === 'pending_review') {
+                  setNotice(`获取完成：${run.fetchedCount || 0} 台，待审核。`);
+                  setTab('preview');
+                } else if (run.status === 'failed') {
+                  setNotice(`获取失败：${run.errorMessage || '未知错误'}`);
+                }
                 await Promise.all([fetchUpProducts(), fetchDiff(), fetchSyncRuns(), load()]);
               }
             } else { clearInterval(timer); _setSyncing2(false); }
@@ -774,7 +783,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
   const unpublishedCount = upProducts.filter(p => !p.published && p.status === 'on_sale').length;
 
   const tabs = [['new', '新增', diff.new?.length || 0], ['changed', '变更', diff.changed?.length || 0], ['offline', '下架', diff.offline?.length || 0], ['unchanged', '未变', diff.unchanged?.length || 0], ['localOnly', '本地独有', diff.localOnly?.length || 0]];
-  const pageTabs = ['上游产品', '本站产品', '差异处理', '获取预览', '同步日志', '危险操作'];
+  const pageTabs = ['上游产品', '本站产品', '差异处理', '获取预览', '获取记录', '危险操作'];
 
   // For localOnly: identify product status
   const getLocalProductStatus = (item) => {
@@ -801,7 +810,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
         <div className="admin-upstream-sync-progress">
           <div className="sync-progress-bar">
             <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-            <span>同步中... {syncProgress.fetchedCount ? `已抓取 ${syncProgress.fetchedCount} 台` : ''}</span>
+            <span>获取中... {syncProgress.fetchedCount ? `已抓取 ${syncProgress.fetchedCount} 台` : ''}</span>
             {syncProgress.startedAt && <span className="muted" style={{ fontSize: '0.8rem' }}>耗时 {Math.floor((Date.now() - new Date(syncProgress.startedAt).getTime()) / 1000)}s</span>}
             {syncLogs.length > 0 && <span className="muted" style={{ fontSize: '0.82rem' }}>最近: {syncLogs[syncLogs.length - 1]?.message?.slice(0, 60)}</span>}
           </div>
@@ -832,8 +841,8 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
             <div className="admin-upstream-status-item"><span>待下架</span><strong className="text-red">{diff.offline?.length || 0}</strong></div>
           </div>
           <div className="admin-upstream-filters">
-            <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
-            <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option><option value="offline">已下线</option></select>
+            <select className="admin-select" value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
+            <select className="admin-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option><option value="offline">已下线</option></select>
             <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
           </div>
           <DataTable pagination columns={['', '产品信息', '产品组/线路', '配置', '价格', '库存', '发布状态', '操作']}
@@ -890,8 +899,8 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
             </div>
           </div>
           <div className="admin-upstream-filters">
-            <select value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
-            {diffTab !== 'localOnly' && <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option></select>}
+            <select className="admin-select" value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
+            {diffTab !== 'localOnly' && <select className="admin-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option></select>}
             <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
           </div>
 
@@ -992,7 +1001,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
       {/* === SYNC LOGS TAB === */}
       {tab === 'logs' && (
         <>
-          <h3 style={{ margin: '0 0 14px' }}>同步历史 (最近20次)</h3>
+          <h3 style={{ margin: '0 0 14px' }}>获取记录 (最近20次)</h3>
           <DataTable pagination columns={['时间', '状态', '抓取', '新增', '变更', '下架', '错误', '日志']}
             rows={syncRuns.map(run => [
               formatDate(run.startedAt),
@@ -1049,7 +1058,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}><label>月付(分)<input type="number" value={crudForm.priceMonthly} onChange={e => setCrudForm(p => ({ ...p, priceMonthly: e.target.value }))} /></label><label>显示价格<input value={crudForm.priceShow} onChange={e => setCrudForm(p => ({ ...p, priceShow: e.target.value }))} /></label><label>库存(-1不限)<input type="number" value={crudForm.stock} onChange={e => setCrudForm(p => ({ ...p, stock: e.target.value }))} /></label></div>
             </fieldset>
             <fieldset><legend>状态</legend>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>状态<select value={crudForm.status} onChange={e => setCrudForm(p => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label><label>排序<input type="number" value={crudForm.sortOrder} onChange={e => setCrudForm(p => ({ ...p, sortOrder: e.target.value }))} /></label></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>状态<select className="admin-select" value={crudForm.status} onChange={e => setCrudForm(p => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label><label>排序<input type="number" value={crudForm.sortOrder} onChange={e => setCrudForm(p => ({ ...p, sortOrder: e.target.value }))} /></label></div>
             </fieldset>
             <button className="primary" type="submit" disabled={crudSaving}>{crudSaving ? '保存中...' : (editItem ? '保存修改' : '新增产品')}</button>
           </form>
@@ -1170,7 +1179,7 @@ function AdminServers({ servers, keyword, orders, form, setForm, openServer, ope
       <h1>服务器管理</h1>
       <Panel title="从已支付订单开通服务器">
         <form className="admin-form product-form" onSubmit={openServer}>
-          <select value={form.orderId} onChange={(event) => setForm((prev) => ({ ...prev, orderId: event.target.value }))}>{orders.map((order) => <option key={order.id} value={order.id}>{order.orderNo} / {order.user?.username}</option>)}</select>
+          <select className="admin-select" value={form.orderId} onChange={(event) => setForm((prev) => ({ ...prev, orderId: event.target.value }))}>{orders.map((order) => <option key={order.id} value={order.id}>{order.orderNo} / {order.user?.username}</option>)}</select>
           <input placeholder="服务器名称" value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} required />
           <input placeholder="IP" value={form.ip} onChange={(event) => setForm((prev) => ({ ...prev, ip: event.target.value }))} required />
           <input placeholder="系统" value={form.os} onChange={(event) => setForm((prev) => ({ ...prev, os: event.target.value }))} />
@@ -1274,7 +1283,7 @@ function AdminUpstream({ api, setNotice, load }) {
   const doSync = async () => {
     setSyncing(true);
     try {
-      const result = await api('/api/admin/upstream/fastmos/sync', { method: 'POST' });
+      const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
       setNotice(`同步完成：拉取 ${result.fetched} 条，新增 ${result.new}，变更 ${result.changed}，下架 ${result.offline}`);
       await Promise.all([fetchProducts(), fetchDiff()]);
     } catch (e) { setNotice(e.message); }
@@ -1380,7 +1389,7 @@ function AdminUpstream({ api, setNotice, load }) {
     setSyncing(true);
     setSyncProgress(null); setSyncLogs([]);
     try {
-      const result = await api('/api/admin/upstream/fastmos/sync', { method: 'POST' });
+      const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
       setNotice(`同步完成：拉取 ${result.fetched} 条，新增 ${result.new}，变更 ${result.changed}，下架 ${result.offline}`);
       await Promise.all([fetchProducts(), fetchDiff(), fetchSyncRuns()]);
       // Fetch logs for completed run
@@ -1455,7 +1464,7 @@ function AdminUpstream({ api, setNotice, load }) {
             <RefreshCw size={17} />{syncing ? (syncProgress?.status === 'running' ? '同步中...' : '同步中...') : '同步上游服务器'}
           </button>
           <button className="secondary" onClick={openCreate}><Plus size={17} />新增上游产品</button>
-          <button className="secondary" onClick={() => { fetchSyncRuns(); setShowSyncHistory(true); }}>同步历史</button>
+          <button className="secondary" onClick={() => { fetchSyncRuns(); setShowSyncHistory(true); }}>获取记录</button>
         </div>
       </div>
 
@@ -1653,7 +1662,7 @@ function AdminUpstream({ api, setNotice, load }) {
             </fieldset>
             <fieldset><legend>状态与排序</legend>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <label>状态<select value={crudForm.status} onChange={(e) => setCrudForm((p) => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label>
+                <label>状态<select className="admin-select" value={crudForm.status} onChange={(e) => setCrudForm((p) => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label>
                 <label>排序<input type="number" value={crudForm.sortOrder} onChange={(e) => setCrudForm((p) => ({ ...p, sortOrder: e.target.value }))} /></label>
               </div>
             </fieldset>
@@ -1715,7 +1724,7 @@ function AdminUpstream({ api, setNotice, load }) {
 
       {/* Sync history */}
       {showSyncHistory && (
-        <Modal title="同步历史 (最近20次)" onClose={() => setShowSyncHistory(false)}>
+        <Modal title="获取记录 (最近20次)" onClose={() => setShowSyncHistory(false)}>
           <div className="responsive-table">
             <table>
               <thead><tr><th>时间</th><th>状态</th><th>抓取</th><th>新增</th><th>变更</th><th>下架</th><th>错误</th><th>日志</th></tr></thead>

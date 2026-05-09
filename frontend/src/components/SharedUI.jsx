@@ -273,7 +273,7 @@ export function DataTable({ columns, rows, pagination, pageSize: pageSizeProp, d
       <div className="dt-pagination">
         <span className="dt-page-info">第 {start + 1}-{Math.min(start + pageSize, rows.length)} 条 / 共 {rows.length} 条</span>
         <div className="dt-page-controls">
-          <select className="dt-page-size" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
+          <select className="dt-page-size admin-select" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
             {pageSizeOptions.map((n) => <option key={n} value={n}>{n} 条/页</option>)}
           </select>
           <button disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>上一页</button>
