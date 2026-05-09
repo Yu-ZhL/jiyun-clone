@@ -291,6 +291,43 @@ model OperationLog {
   @@index([adminId])
 }
 
+model UpstreamSyncPreview {
+  id                String           @id @default(cuid())
+  runId             String
+  sourceId          String
+  upstreamId        String
+  action            String
+  title             String?
+  areaGroup         String?
+  area              String?
+  areaId            String?
+  netline           String?
+  cpu               String?
+  cpuCount          Int?
+  memory            String?
+  disk              String?
+  diskNum           Int?
+  diskSn            String?
+  bandwidth         String?
+  defense           String?
+  priceMonthly      Int?
+  priceShow         String?
+  stock             Int?
+  status            String?
+  sortOrder         Int              @default(0)
+  payloadJson       String?          @db.Text
+  diffJson          String?          @db.Text
+  normHash          String?
+  existingProductId String?
+  applied           Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+
+  @@index([runId])
+  @@index([sourceId])
+  @@index([action])
+  @@unique([runId, upstreamId])
+}
+
 model UpstreamSyncLog {
   id        String   @id @default(cuid())
   runId     String

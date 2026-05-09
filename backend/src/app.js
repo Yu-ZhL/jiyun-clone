@@ -1330,7 +1330,7 @@ export function createApp() {
 
       const endedAt = new Date();
       await prisma.upstreamSyncRun.update({
-        where: { id: run.id },
+        where: { id: runId },
         data: { status: 'success', endedAt, fetchedCount: servers.length, newCount, changedCount, offlineCount }
       });
       await prisma.upstreamSource.update({ where: { id: source.id }, data: { lastSyncAt: endedAt } });
@@ -1342,7 +1342,7 @@ export function createApp() {
     } catch (error) {
       await log('error', 'fail', `同步失败: ${error.message}`);
       await prisma.upstreamSyncRun.update({
-        where: { id: run.id },
+        where: { id: runId },
         data: { status: 'failed', endedAt: new Date(), errorMessage: error.message, errorCount: 1 }
       });
       throw error;
@@ -1514,6 +1514,230 @@ export function createApp() {
 
     await logOperation(req, 'upstream_merge', 'upstream_source', source.id, { action, count: upstreamIds.length, ...results });
     ok(res, results);
+  }));
+
+  // ── Clear all products (dangerous, requires password) ──
+
+  app.post('/api/admin/products/clear-all', requireAdmin, asyncRoute(async (req, res) => {
+    const { password, confirmText, scope } = req.body;
+    if (confirmText !== 'CLEAR_PRODUCTS') return fail(res, 40090, '确认文本不正确，请输入 CLEAR_PRODUCTS');
+    if (!password) return fail(res, 40091, '请输入管理员密码');
+
+    const admin = await prisma.admin.findUnique({ where: { id: req.admin.id } });
+    if (!admin || !(await bcrypt.compare(password, admin.passwordHash))) {
+      await logOperation(req, 'clear_products_failed_wrong_password', 'product', null, {});
+      return fail(res, 40115, '管理员密码错误', 401);
+    }
+
+    let deleted = 0, archived = 0, skipped = 0;
+    const products = await prisma.product.findMany({ include: { orders: { select: { id: true } }, servers: { select: { id: true } } } });
+
+    for (const p of products) {
+      if (p.orders.length > 0 || p.servers.length > 0) {
+        if (p.status !== 'off_sale') {
+          await prisma.product.update({ where: { id: p.id }, data: { status: 'off_sale' } });
+          archived++;
+        } else { skipped++; }
+      } else {
+        await prisma.product.delete({ where: { id: p.id } });
+        deleted++;
+      }
+    }
+
+    await logOperation(req, 'clear_all_products', 'product', null, { deleted, archived, skipped, scope });
+    ok(res, { deleted, archived, skipped });
+  }));
+
+  // ── Fetch-preview (phase A: fetch upstream, store to preview table) ──
+
+  app.post('/api/admin/upstream/fastmos/fetch-preview', requireAdmin, asyncRoute(async (req, res) => {
+    if (_syncing) {
+      const current = await prisma.upstreamSyncRun.findFirst({ where: { status: 'running' }, orderBy: { startedAt: 'desc' } });
+      return ok(res, { runId: current?.id, status: 'running', alreadyRunning: true });
+    }
+    const source = await ensureFastmosSource();
+    const run = await prisma.upstreamSyncRun.create({ data: { sourceId: source.id, status: 'running', startedAt: new Date() } });
+    _syncing = true;
+
+    // Background: fetch upstream data and store to preview table
+    (async () => {
+      const runId = run.id;
+      const log = (level, step, msg) => prisma.upstreamSyncLog.create({ data: { runId, level, step, message: msg } }).catch(() => {});
+      try {
+        await log('info', 'start', '开始获取上游数据预览');
+        const upstream = await fetchFastmosAll();
+        const { childAreaMap, parentNameByChildId, areaNetlineMap } = buildAreaMaps(upstream.area_list, upstream.child_area_list, upstream.netline_list);
+        const servers = upstream.server_list || [];
+        const upstreamIds = new Set();
+
+        let newCount = 0, changedCount = 0, unchangedCount = 0, offlineCount = 0;
+
+        // Upsert preview records
+        for (const server of servers) {
+          const upstreamId = String(server.id);
+          upstreamIds.add(upstreamId);
+          const cfg = server.server_config || {};
+          const childId = String(server.default_area_id || '');
+          const childInfo = childAreaMap[childId] || {};
+          const areaGroup = parentNameByChildId[childId] || childInfo.name || null;
+          const area = childInfo.name || null;
+          const netline = areaNetlineMap[childId] || null;
+          const hash = normHash(server, areaGroup, netline);
+
+          const existing = await prisma.upstreamServerProduct.findUnique({ where: { sourceId_upstreamId: { sourceId: source.id, upstreamId } } });
+          let action = 'new';
+          if (existing) {
+            action = existing.normHash !== hash ? 'changed' : 'unchanged';
+          }
+
+          const previewData = {
+            runId, sourceId: source.id, upstreamId,
+            action, title: server.title || '',
+            areaGroup, area, areaId: childId, netline,
+            cpu: cfg.cpus_sn || null, cpuCount: parseInt(cfg.cpus, 10) || null,
+            memory: cfg.mem_start ? `${cfg.mem_start}MB` : null,
+            disk: cfg.disk ? `${cfg.disk}GB` : null,
+            diskNum: parseInt(cfg.disk_num, 10) || null, diskSn: cfg.disk_sn || null,
+            bandwidth: cfg.net ? `${cfg.net}M` : null, defense: cfg.def || null,
+            priceMonthly: parsePriceCents(server.price_show),
+            priceShow: server.price_show || null,
+            stock: parseInt(server.stock, 10) || 0,
+            status: server.status === '1' || server.on_sale === '1' ? 'on_sale' : 'off_sale',
+            sortOrder: parseInt(server.sort, 10) || 0,
+            payloadJson: JSON.stringify(server),
+            diffJson: existing ? JSON.stringify({ oldHash: existing.normHash, newHash: hash }) : null,
+            normHash: hash,
+            existingProductId: existing?.productId || null, applied: false
+          };
+
+          await prisma.upstreamSyncPreview.upsert({
+            where: { runId_upstreamId: { runId, upstreamId } },
+            create: previewData,
+            update: { ...previewData, applied: false }
+          });
+
+          if (action === 'new') newCount++;
+          else if (action === 'changed') changedCount++;
+          else unchangedCount++;
+        }
+
+        // Mark offline: products that exist in UpstreamServerProduct but not in this fetch
+        const allExisting = await prisma.upstreamServerProduct.findMany({ where: { sourceId: source.id } });
+        for (const p of allExisting) {
+          if (!upstreamIds.has(p.upstreamId) && p.status !== 'offline') {
+            await prisma.upstreamSyncPreview.create({
+              data: {
+                runId, sourceId: source.id, upstreamId: p.upstreamId,
+                action: 'offline', title: p.title,
+                areaGroup: p.areaGroup, area: p.area, areaId: p.areaId, netline: p.netline,
+                cpu: p.cpu, cpuCount: p.cpuCount, memory: p.memory, disk: p.disk,
+                diskNum: p.diskNum, diskSn: p.diskSn, bandwidth: p.bandwidth, defense: p.defense,
+                priceMonthly: p.priceMonthly, priceShow: p.priceShow, stock: p.stock,
+                status: p.status, sortOrder: p.sortOrder,
+                payloadJson: p.rawJson || '',
+                existingProductId: p.productId, applied: false
+              }
+            });
+            offlineCount++;
+          }
+        }
+
+        const endedAt = new Date();
+        await prisma.upstreamSyncRun.update({ where: { id: runId }, data: { status: 'pending_review', endedAt, fetchedCount: servers.length, newCount, changedCount, offlineCount } });
+        await log('info', 'complete', `预览获取完成：${servers.length} 台，新增${newCount}，变更${changedCount}，不变${unchangedCount}，下线${offlineCount}`);
+      } catch (err) {
+        await log('error', 'fail', `预览获取失败: ${err.message}`);
+        await prisma.upstreamSyncRun.update({ where: { id: runId }, data: { status: 'failed', endedAt: new Date(), errorMessage: err.message, errorCount: 1 } });
+      } finally { _syncing = false; }
+    })();
+
+    await logOperation(req, 'fetch_preview_start', 'upstream_source', source.id, { runId: run.id });
+    ok(res, { runId: run.id, status: 'running' });
+  }));
+
+  // ── Preview listing (phase B) ──
+  app.get('/api/admin/upstream/fastmos/sync-runs/:runId/preview', requireAdmin, asyncRoute(async (req, res) => {
+    const { action, keyword, page, pageSize } = req.query;
+    const where = { runId: req.params.runId };
+    if (action) where.action = action;
+    let items = await prisma.upstreamSyncPreview.findMany({ where, orderBy: { createdAt: 'asc' } });
+    if (keyword) {
+      const q = keyword.toLowerCase();
+      items = items.filter(p => (p.title || '').toLowerCase().includes(q) || (p.cpu || '').toLowerCase().includes(q) || (p.areaGroup || '').toLowerCase().includes(q));
+    }
+    ok(res, items);
+  }));
+
+  // ── Apply preview to formal products (phase C) ──
+  app.post('/api/admin/upstream/fastmos/sync-runs/:runId/apply', requireAdmin, asyncRoute(async (req, res) => {
+    const { previewIds, applyMode } = req.body;
+    const source = await ensureFastmosSource();
+    const runId = req.params.runId;
+
+    let previews;
+    if (applyMode === 'all_new_changed') {
+      previews = await prisma.upstreamSyncPreview.findMany({ where: { runId, action: { in: ['new', 'changed'] }, applied: false } });
+    } else if (previewIds && previewIds.length > 0) {
+      previews = await prisma.upstreamSyncPreview.findMany({ where: { id: { in: previewIds }, runId, applied: false } });
+    } else {
+      return fail(res, 40092, '请选择要应用的预览项');
+    }
+
+    let applied = 0, failed = 0;
+    for (const pv of previews) {
+      try {
+        if (pv.action === 'new') {
+          await prisma.upstreamServerProduct.create({
+            data: {
+              sourceId: source.id, upstreamId: pv.upstreamId, title: pv.title || '',
+              areaGroup: pv.areaGroup, area: pv.area, areaId: pv.areaId, netline: pv.netline,
+              cpu: pv.cpu, cpuCount: pv.cpuCount, memory: pv.memory, disk: pv.disk,
+              diskNum: pv.diskNum, diskSn: pv.diskSn, bandwidth: pv.bandwidth, defense: pv.defense,
+              priceMonthly: pv.priceMonthly, priceShow: pv.priceShow, stock: pv.stock,
+              status: pv.status || 'on_sale', sortOrder: pv.sortOrder, normHash: pv.normHash,
+              rawJson: pv.payloadJson || '', published: false
+            }
+          });
+        } else if (pv.action === 'changed') {
+          await prisma.upstreamServerProduct.upsert({
+            where: { sourceId_upstreamId: { sourceId: source.id, upstreamId: pv.upstreamId } },
+            create: {
+              sourceId: source.id, upstreamId: pv.upstreamId, title: pv.title || '',
+              areaGroup: pv.areaGroup, area: pv.area, areaId: pv.areaId, netline: pv.netline,
+              cpu: pv.cpu, cpuCount: pv.cpuCount, memory: pv.memory, disk: pv.disk,
+              diskNum: pv.diskNum, diskSn: pv.diskSn, bandwidth: pv.bandwidth, defense: pv.defense,
+              priceMonthly: pv.priceMonthly, priceShow: pv.priceShow, stock: pv.stock,
+              status: pv.status || 'on_sale', sortOrder: pv.sortOrder, normHash: pv.normHash,
+              rawJson: pv.payloadJson || '', published: false
+            },
+            update: {
+              title: pv.title || undefined, areaGroup: pv.areaGroup, area: pv.area, areaId: pv.areaId, netline: pv.netline,
+              cpu: pv.cpu, cpuCount: pv.cpuCount, memory: pv.memory, disk: pv.disk,
+              diskNum: pv.diskNum, diskSn: pv.diskSn, bandwidth: pv.bandwidth, defense: pv.defense,
+              priceMonthly: pv.priceMonthly, priceShow: pv.priceShow, stock: pv.stock,
+              status: pv.status || 'on_sale', sortOrder: pv.sortOrder, normHash: pv.normHash,
+              rawJson: pv.payloadJson || ''
+            }
+          });
+        }
+        await prisma.upstreamSyncPreview.update({ where: { id: pv.id }, data: { applied: true } });
+        applied++;
+      } catch (e) {
+        failed++;
+        await prisma.upstreamSyncLog.create({ data: { runId, level: 'error', step: 'apply', message: `应用 ${pv.upstreamId} 失败: ${e.message}` } }).catch(() => {});
+      }
+    }
+
+    const run = await prisma.upstreamSyncRun.findUnique({ where: { id: runId } });
+    if (run && run.status === 'pending_review') {
+      const remaining = await prisma.upstreamSyncPreview.count({ where: { runId, applied: false } });
+      if (remaining === 0) {
+        await prisma.upstreamSyncRun.update({ where: { id: runId }, data: { status: 'applied' } });
+      }
+    }
+
+    await logOperation(req, 'apply_preview', 'upstream_source', source.id, { runId, applied, failed });
+    ok(res, { applied, failed });
   }));
 
   // ── Upstream product CRUD ──
@@ -1757,34 +1981,8 @@ export function createApp() {
     fail(res, 50000, error.message || '服务器错误', 500);
   });
 
-  // ── Auto-sync on first startup (empty upstream table) ──
-  setTimeout(async () => {
-    if (_syncing) return;
-    try {
-      const count = await prisma.upstreamServerProduct.count();
-      if (count === 0) {
-        _syncing = true;
-        console.log('[auto-sync] Upstream table empty, triggering initial sync...');
-        const result = await syncFastmosProducts();
-        console.log(`[auto-sync] Initial sync complete: fetched=${result.fetched} new=${result.new}`);
-      }
-    } catch (error) {
-      console.error('[auto-sync] Initial sync failed:', error.message);
-      // Record failed run
-      try {
-        const source = await ensureFastmosSource();
-        await prisma.upstreamSyncRun.create({
-          data: {
-            sourceId: source.id,
-            status: 'failed',
-            endedAt: new Date(),
-            errorMessage: `Auto-sync: ${error.message}`,
-            errorCount: 1
-          }
-        });
-      } catch (_) { /* don't fail startup */ }
-    }
-  }, 3000);
+  // ── Auto-sync REMOVED — upstream sync must be manual ──
+  // Auto-sync disabled — admin must manually trigger upstream data fetch via /admin/products
 
   return app;
 }

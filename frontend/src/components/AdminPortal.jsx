@@ -664,7 +664,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
     _setSyncing2(true);
     setSyncProgress(null); setSyncLogs([]);
     try {
-      const result = await api('/api/admin/upstream/fastmos/sync', { method: 'POST' });
+      const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
       if (result.runId) {
         setSyncProgress({ id: result.runId, status: 'running', startedAt: new Date().toISOString() });
         setNotice('同步已启动，正在后台执行...');
@@ -677,7 +677,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
               setSyncLogs(cur.logs || []);
               if (cur.run?.status !== 'running') {
                 clearInterval(timer); _setSyncing2(false);
-                setNotice(`同步完成：${cur.run?.fetchedCount || 0} 台`);
+                setNotice(`上游数据获取完成：${cur.run?.fetchedCount || 0} 台，待审核`);
                 await Promise.all([fetchUpProducts(), fetchDiff(), fetchSyncRuns(), load()]);
               }
             } else { clearInterval(timer); _setSyncing2(false); }
@@ -732,6 +732,22 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
   const toggleSelect = (id) => { const n = new Set(selected); if (n.has(id)) n.delete(id); else n.add(id); setSelected(n); };
 
   // Sync logs
+  const [previewItems, setPreviewItems] = useState([]);
+  const [previewRunId, setPreviewRunId] = useState(null);
+  const viewRunPreview = async (runId) => {
+    try {
+      const items = await api(`/api/admin/upstream/fastmos/sync-runs/${runId}/preview`);
+      setPreviewItems(items);
+      setPreviewRunId(runId);
+    } catch (e) { setNotice(e.message); }
+  };
+  const applyPreview = async (runId, mode) => {
+    try {
+      const result = await api(`/api/admin/upstream/fastmos/sync-runs/${runId}/apply`, { method: 'POST', body: { applyMode: mode } });
+      setNotice(`已应用 ${result.applied} 项${result.failed > 0 ? `，${result.failed} 项失败` : ''}`);
+      await Promise.all([fetchUpProducts(), fetchDiff(), fetchSyncRuns(), load()]);
+    } catch (e) { setNotice(e.message); }
+  };
   const viewRunLogs = async (runId) => {
     try {
       const run = syncRuns.find(r => r.id === runId);
@@ -758,7 +774,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
   const unpublishedCount = upProducts.filter(p => !p.published && p.status === 'on_sale').length;
 
   const tabs = [['new', '新增', diff.new?.length || 0], ['changed', '变更', diff.changed?.length || 0], ['offline', '下架', diff.offline?.length || 0], ['unchanged', '未变', diff.unchanged?.length || 0], ['localOnly', '本地独有', diff.localOnly?.length || 0]];
-  const pageTabs = ['上游产品', '本站产品', '差异处理', '同步日志'];
+  const pageTabs = ['上游产品', '本站产品', '差异处理', '获取预览', '同步日志', '危险操作'];
 
   // For localOnly: identify product status
   const getLocalProductStatus = (item) => {
@@ -772,10 +788,11 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
         <h1>产品管理</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="primary" onClick={syncUpstream} disabled={_syncing2}>
-            <RefreshCw size={17} />{_syncing2 ? '同步中...' : '同步上游服务器'}
+            <RefreshCw size={17} />{_syncing2 ? '获取中...' : '获取上游数据'}
           </button>
           <button className="secondary" onClick={openCreate}><Plus size={17} />新增上游产品</button>
           <button className="secondary" onClick={cleanupTestProducts}>清理测试产品</button>
+          <button className="secondary" onClick={() => { setTab('danger'); }}>危险操作</button>
         </div>
       </div>
 
@@ -796,7 +813,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
         <div className="filter-tabs">
           {pageTabs.map((t) => (
             <button key={t} className={`filter-tab ${(tab === 'upstream' && t === '上游产品') || (tab === 'local' && t === '本站产品') || (tab === 'diff' && t === '差异处理') || (tab === 'logs' && t === '同步日志') ? 'active' : ''}`}
-              onClick={() => { setTab(t === '上游产品' ? 'upstream' : t === '本站产品' ? 'local' : t === '差异处理' ? 'diff' : 'logs'); setSelected(new Set()); }}>
+              onClick={() => { setTab(t === '上游产品' ? 'upstream' : t === '本站产品' ? 'local' : t === '差异处理' ? 'diff' : t === '获取预览' ? 'preview' : t === '危险操作' ? 'danger' : 'logs'); setSelected(new Set()); }}>
               {t}
             </button>
           ))}
@@ -918,6 +935,60 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
         </>
       )}
 
+      {/* === PREVIEW TAB === */}
+      {tab === 'preview' && (
+        <>
+          <h3 style={{ margin: '0 0 14px' }}>最近获取预览</h3>
+          {syncRuns.length === 0 ? <p className="muted">暂无获取记录，请先点击"获取上游数据"。</p> : (
+            <DataTable pagination columns={['时间', '状态', '抓取', '新增', '变更', '下架', '操作']}
+              rows={syncRuns.slice(0, 10).map(run => [
+                formatDate(run.startedAt),
+                <span className={`status-pill ${run.status === 'pending_review' ? 'expiring' : run.status === 'applied' ? 'on_sale' : run.status === 'running' ? 'expiring' : 'off_sale'}`}>{run.status === 'pending_review' ? '待审核' : run.status === 'applied' ? '已应用' : run.status}</span>,
+                run.fetchedCount, run.newCount, run.changedCount, run.offlineCount,
+                <ActionGroup actions={[
+                  ['查看预览', () => viewRunPreview(run.id)],
+                  ...(run.status === 'pending_review' ? [['应用全部新增/变更', () => applyPreview(run.id, 'all_new_changed')]] : []),
+                  ['查看日志', () => viewRunLogs(run.id)]
+                ]} />
+              ])}
+            />
+          )}
+        </>
+      )}
+
+      {/* === DANGER TAB === */}
+      {tab === 'danger' && (
+        <>
+          <Panel title="危险操作">
+            <p className="muted" style={{ marginBottom: 16 }}>以下操作不可逆，请谨慎使用。</p>
+            <ClearAllProductsPanel api={api} setNotice={setNotice} load={load} />
+          </Panel>
+        </>
+      )}
+
+      {/* Preview items modal */}
+      {previewItems.length > 0 && (
+        <Modal title={`获取预览 (${previewRunId?.slice(-8)})`} onClose={() => setPreviewItems([])}>
+          <div className="responsive-table" style={{ maxHeight: '50vh', overflow: 'auto' }}>
+            <table>
+              <thead><tr><th>类型</th><th>标题</th><th>区域/线路</th><th>CPU</th><th>价格</th><th>操作</th></tr></thead>
+              <tbody>
+                {previewItems.map(pv => (
+                  <tr key={pv.id} style={pv.action === 'unchanged' ? { opacity: 0.5 } : {}}>
+                    <td><span className={`status-pill ${pv.action === 'new' ? 'on_sale' : pv.action === 'changed' ? 'expiring' : pv.action === 'offline' ? 'off_sale' : ''}`}>{pv.action === 'new' ? '新增' : pv.action === 'changed' ? '变更' : pv.action === 'offline' ? '下线' : '不变'}</span></td>
+                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>{pv.title || '-'}</td>
+                    <td>{pv.areaGroup || '-'} / {pv.area || ''}</td>
+                    <td>{pv.cpu || '-'}</td>
+                    <td>{pv.priceShow ? `$${pv.priceShow}` : '-'}</td>
+                    <td>{!pv.applied && pv.action !== 'unchanged' && <button className="table-action" onClick={() => applyPreview(previewRunId, 'selected', [pv.id])}>应用</button>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
+      )}
+
       {/* === SYNC LOGS TAB === */}
       {tab === 'logs' && (
         <>
@@ -1034,6 +1105,34 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
         </Modal>
       )}
     </div>
+  );
+}
+
+function ClearAllProductsPanel({ api, setNotice, load }) {
+  const [password, setPassword] = useState('');
+  const [confirmText, setConfirmText] = useState('');
+  const [clearing, setClearing] = useState(false);
+
+  const doClear = async (e) => {
+    e.preventDefault();
+    if (confirmText !== 'CLEAR_PRODUCTS') { setNotice('请正确输入确认文本 CLEAR_PRODUCTS'); return; }
+    setClearing(true);
+    try {
+      const result = await api('/api/admin/products/clear-all', { method: 'POST', body: { password, confirmText, scope: 'local' } });
+      setNotice(`已清空：删除 ${result.deleted} 个，归档 ${result.archived} 个，跳过 ${result.skipped} 个`);
+      setPassword(''); setConfirmText('');
+      await load();
+    } catch (e) { setNotice(e.message); }
+    finally { setClearing(false); }
+  };
+
+  return (
+    <form className="modal-form" onSubmit={doClear}>
+      <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 12 }}>清空所有本地产品。有关联订单/服务器的产品将被下架而非删除。</p>
+      <label>管理员密码<input type="password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
+      <label>输入 CLEAR_PRODUCTS 确认<input value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder="CLEAR_PRODUCTS" required /></label>
+      <button className="primary" type="submit" disabled={clearing} style={{ background: 'var(--red)' }}>{clearing ? '执行中...' : '确认清空所有产品'}</button>
+    </form>
   );
 }
 
