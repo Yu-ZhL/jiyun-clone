@@ -1514,16 +1514,30 @@ export function createApp() {
       return fail(res, 40115, '管理员密码错误', 401);
     }
 
+    const forceClean = req.body.forceCleanBusinessData === true;
+
+    if (forceClean) {
+      // Cascade: clean business data first, then delete products
+      const bc = await Promise.all([
+        prisma.renewal.deleteMany(), prisma.server.deleteMany(),
+        prisma.walletTransaction.deleteMany(), prisma.notification.deleteMany(),
+        prisma.ticketReply.deleteMany(), prisma.ticket.deleteMany(),
+        prisma.impersonationToken.deleteMany(), prisma.order.deleteMany()
+      ]);
+    }
+
     let deleted = 0, archived = 0, skipped = 0;
     const products = await prisma.product.findMany({ include: { orders: { select: { id: true } }, servers: { select: { id: true } } } });
 
     for (const p of products) {
-      if (p.orders.length > 0 || p.servers.length > 0) {
+      if (!forceClean && (p.orders.length > 0 || p.servers.length > 0)) {
         if (p.status !== 'off_sale') {
           await prisma.product.update({ where: { id: p.id }, data: { status: 'off_sale' } });
           archived++;
         } else { skipped++; }
       } else {
+        // Unlink upstream first
+        await prisma.upstreamServerProduct.updateMany({ where: { productId: p.id }, data: { productId: null, published: false } });
         await prisma.product.delete({ where: { id: p.id } });
         deleted++;
       }

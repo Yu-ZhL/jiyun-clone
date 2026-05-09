@@ -1121,13 +1121,14 @@ function ClearAllProductsPanel({ api, setNotice, load }) {
   const [password, setPassword] = useState('');
   const [confirmText, setConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
+  const [forceClean, setForceClean] = useState(true);
 
   const doClear = async (e) => {
     e.preventDefault();
     if (confirmText !== 'CLEAR_PRODUCTS') { setNotice('请正确输入确认文本 CLEAR_PRODUCTS'); return; }
     setClearing(true);
     try {
-      const result = await api('/api/admin/products/clear-all', { method: 'POST', body: { password, confirmText, scope: 'local' } });
+      const result = await api('/api/admin/products/clear-all', { method: 'POST', body: { password, confirmText, scope: 'local', forceCleanBusinessData: forceClean } });
       setNotice(`已清空：删除 ${result.deleted} 个，归档 ${result.archived} 个，跳过 ${result.skipped} 个`);
       setPassword(''); setConfirmText('');
       await load();
@@ -1140,6 +1141,7 @@ function ClearAllProductsPanel({ api, setNotice, load }) {
       <p className="muted" style={{ fontSize: '0.85rem', marginBottom: 12 }}>清空所有本地产品。有关联订单/服务器的产品将被下架而非删除。</p>
       <label>管理员密码<input type="password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
       <label>输入 CLEAR_PRODUCTS 确认<input value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder="CLEAR_PRODUCTS" required /></label>
+      <label className="remember"><input type="checkbox" checked={forceClean} onChange={e => setForceClean(e.target.checked)} /> 同时清理关联的订单/服务器/钱包流水（级联删除）</label>
       <button className="primary" type="submit" disabled={clearing} style={{ background: 'var(--red)' }}>{clearing ? '执行中...' : '确认清空所有产品'}</button>
     </form>
   );
