@@ -1,0 +1,300 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Admin {
+  id            String              @id @default(cuid())
+  username      String              @unique
+  passwordHash  String
+  name          String
+  role          String              @default("super_admin")
+  status        String              @default("active")
+  lastLoginAt   DateTime?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  walletLogs    WalletTransaction[]
+  operationLogs OperationLog[]
+}
+
+model User {
+  id                  String               @id @default(cuid())
+  username            String               @unique
+  email               String               @unique
+  phone               String?
+  passwordHash        String
+  balance             Int                  @default(0)
+  status              String               @default("active")
+  registerIp          String?
+  lastLoginAt         DateTime?
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  orders              Order[]
+  servers             Server[]
+  walletLogs          WalletTransaction[]
+  tickets             Ticket[]
+  notifications       Notification[]
+  impersonationTokens ImpersonationToken[]
+}
+
+model Product {
+  id              String                  @id @default(cuid())
+  name            String
+  type            String
+  location        String
+  cpu             String
+  memory          String
+  disk            String
+  bandwidth       String
+  defense         String
+  priceMonthly    Int
+  priceYearly     Int
+  stock           Int                     @default(0)
+  status          String                  @default("on_sale")
+  sortOrder       Int                     @default(0)
+  description     String?                 @db.Text
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  orders          Order[]
+  servers         Server[]
+  upstreamProduct UpstreamServerProduct?
+}
+
+model UpstreamSource {
+  id            String                  @id @default(cuid())
+  name          String
+  apiUrl        String
+  defaultParams String?                 @db.Text
+  status        String                  @default("active")
+  lastSyncAt    DateTime?
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  products      UpstreamServerProduct[]
+  syncRuns      UpstreamSyncRun[]
+}
+
+model UpstreamServerProduct {
+  id           String          @id @default(cuid())
+  sourceId     String
+  upstreamId   String
+  title        String
+  areaGroup    String?
+  area         String?
+  areaId       String?
+  netline      String?
+  netDesc       String?
+  cpu           String?
+  cpuCount     Int?
+  memory       String?
+  disk         String?
+  diskNum      Int?
+  diskSn       String?
+  bandwidth    String?
+  defense      String?
+  priceMonthly Int?
+  priceShow    String?
+  priceConfig  String?         @db.Text
+  stock        Int?
+  status       String?
+  sortOrder    Int             @default(0)
+  rawJson      String?         @db.Text
+  normHash     String?
+  published    Boolean         @default(false)
+  productId    String?         @unique
+  source       UpstreamSource  @relation(fields: [sourceId], references: [id])
+  product      Product?        @relation(fields: [productId], references: [id])
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@unique([sourceId, upstreamId])
+  @@index([sourceId])
+}
+
+model UpstreamSyncRun {
+  id           String         @id @default(cuid())
+  sourceId     String
+  status       String
+  startedAt    DateTime       @default(now())
+  endedAt      DateTime?
+  fetchedCount Int            @default(0)
+  newCount     Int            @default(0)
+  changedCount Int            @default(0)
+  offlineCount Int            @default(0)
+  errorCount   Int            @default(0)
+  errorMessage String?        @db.Text
+  source       UpstreamSource @relation(fields: [sourceId], references: [id])
+  createdAt    DateTime       @default(now())
+
+  @@index([sourceId])
+}
+
+model Order {
+  id              String              @id @default(cuid())
+  orderNo         String              @unique
+  userId          String
+  type            String
+  productId       String?
+  serverId        String?
+  cycle           String?
+  amount          Int
+  payMethod       String?
+  payStatus       String              @default("unpaid")
+  provisionStatus String              @default("none")
+  remark          String?             @db.Text
+  createdAt       DateTime            @default(now())
+  paidAt          DateTime?
+  cancelledAt     DateTime?
+  openedAt        DateTime?
+  user            User                @relation(fields: [userId], references: [id])
+  product         Product?            @relation(fields: [productId], references: [id])
+  server          Server?             @relation("OrderServer", fields: [serverId], references: [id])
+  openedServer    Server?             @relation("ServerOrder")
+  walletLogs      WalletTransaction[]
+  renewals        Renewal[]
+  notifications   Notification[]
+
+  @@index([userId])
+  @@index([productId])
+  @@index([serverId])
+}
+
+model Server {
+  id                     String    @id @default(cuid())
+  userId                 String
+  productId              String
+  orderId                String?   @unique
+  name                   String
+  ip                     String
+  os                     String
+  loginUser              String
+  loginPasswordEncrypted String    @db.Text
+  panelUrl               String?
+  status                 String    @default("pending")
+  openedAt               DateTime?
+  expiresAt              DateTime
+  suspendedAt            DateTime?
+  deletedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  user                   User      @relation(fields: [userId], references: [id])
+  product                Product   @relation(fields: [productId], references: [id])
+  order                  Order?    @relation("ServerOrder", fields: [orderId], references: [id])
+  orders                 Order[]   @relation("OrderServer")
+  renewals               Renewal[]
+
+  @@index([userId])
+  @@index([productId])
+}
+
+model WalletTransaction {
+  id             String   @id @default(cuid())
+  userId         String
+  type           String
+  amount         Int
+  balanceBefore  Int
+  balanceAfter   Int
+  relatedOrderId String?
+  adminId        String?
+  remark         String?  @db.Text
+  createdAt      DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id])
+  order          Order?   @relation(fields: [relatedOrderId], references: [id])
+  admin          Admin?   @relation(fields: [adminId], references: [id])
+
+  @@index([userId])
+  @@index([relatedOrderId])
+  @@index([adminId])
+}
+
+model Renewal {
+  id           String   @id @default(cuid())
+  serverId     String
+  orderId      String
+  oldExpiresAt DateTime
+  newExpiresAt DateTime
+  createdAt    DateTime @default(now())
+  server       Server   @relation(fields: [serverId], references: [id])
+  order        Order    @relation(fields: [orderId], references: [id])
+}
+
+model Ticket {
+  id        String        @id @default(cuid())
+  userId    String
+  title     String
+  category  String        @default("support")
+  status    String        @default("open")
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  closedAt  DateTime?
+  user      User          @relation(fields: [userId], references: [id])
+  replies   TicketReply[]
+
+  @@index([userId])
+}
+
+model TicketReply {
+  id         String   @id @default(cuid())
+  ticketId   String
+  senderType String
+  senderId   String
+  content    String   @db.Text
+  createdAt  DateTime @default(now())
+  ticket     Ticket   @relation(fields: [ticketId], references: [id])
+}
+
+model Notification {
+  id             String    @id @default(cuid())
+  userId         String
+  relatedOrderId String?
+  title          String
+  content        String    @db.Text
+  type           String
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+  user           User      @relation(fields: [userId], references: [id])
+  order          Order?    @relation(fields: [relatedOrderId], references: [id])
+
+  @@index([userId])
+  @@index([relatedOrderId])
+}
+
+model ImpersonationToken {
+  id        String    @id @default(cuid())
+  adminId   String
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id])
+
+  @@index([adminId])
+  @@index([userId])
+}
+
+model OperationLog {
+  id         String   @id @default(cuid())
+  adminId    String?
+  action     String
+  targetType String
+  targetId   String?
+  detail     String?  @db.Text
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+  admin      Admin?   @relation(fields: [adminId], references: [id])
+
+  @@index([adminId])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
