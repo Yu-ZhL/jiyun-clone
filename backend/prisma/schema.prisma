@@ -291,6 +291,19 @@ model OperationLog {
   @@index([adminId])
 }
 
+model UpstreamSyncLog {
+  id        String   @id @default(cuid())
+  runId     String
+  level     String   @default("info")
+  step      String
+  message   String   @db.Text
+  meta      String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([runId])
+  @@index([createdAt])
+}
+
 model SystemSetting {
   id        String   @id @default(cuid())
   key       String   @unique

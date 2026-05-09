@@ -235,7 +235,7 @@ export function createApp() {
 
   app.get('/api/site-settings', asyncRoute(async (_req, res) => {
     const rows = await prisma.systemSetting.findMany({
-      where: { key: { in: ['site_name', 'support_phone', 'support_email', 'copyright', 'hero_title', 'hero_subtitle', 'sales_contact_title', 'sales_contact_text', 'sales_contact_phone', 'sales_contact_wechat', 'sales_contact_qr_url'] } }
+      where: { key: { in: ['site_name', 'support_phone', 'support_email', 'copyright', 'hero_title', 'hero_subtitle', 'sales_contact_title', 'sales_contact_text', 'sales_contact_phone', 'sales_contact_wechat', 'sales_contact_qr_url', 'sales_contact_phone_enabled', 'sales_contact_wechat_enabled', 'sales_contact_email_enabled', 'sales_contact_telegram_enabled', 'sales_contact_qr_enabled', 'sales_contact_telegram', 'sales_contact_telegram_url'] } }
     });
     ok(res, Object.fromEntries(rows.map((row) => [row.key, row.value])));
   }));
@@ -1181,22 +1181,94 @@ export function createApp() {
 
   // ── Reusable sync function (used by admin API and auto-startup) ──
 
+  let _syncing = false;
+
+  async function syncLog(runId, level, step, message, meta = null) {
+    try {
+      await prisma.upstreamSyncLog.create({
+        data: { runId, level, step, message, meta: meta ? JSON.stringify(meta) : null }
+      });
+    } catch (_) { /* log failure shouldn't break sync */ }
+  }
+
   async function syncFastmosProducts() {
     const source = await ensureFastmosSource();
     const run = await prisma.upstreamSyncRun.create({
       data: { sourceId: source.id, status: 'running', startedAt: new Date() }
     });
+    const runId = run.id;
+    const t0 = Date.now();
+
+    const log = (level, step, msg, meta) => syncLog(runId, level, step, msg, meta);
 
     try {
-      const upstream = await fetchFastmosAll();
-      const { childAreaMap, parentNameByChildId, areaNetlineMap } = buildAreaMaps(
-        upstream.area_list, upstream.child_area_list, upstream.netline_list
-      );
-      const servers = upstream.server_list || [];
-      const currentUpstreamIds = new Set();
+      await log('info', 'start', '开始同步 Fastmos 上游数据');
 
-      let newCount = 0;
-      let changedCount = 0;
+      // Step 1: catalog
+      await log('info', 'catalog', '获取初始目录...');
+      const catalog = await fetchFastmosOne('0', '0', '0');
+      const parentAreas = (catalog.area_list || []).filter(
+        (a) => String(a.parent_id || '0') === '0' && String(a.status || '1') === '1'
+      );
+      await log('info', 'catalog', `获取目录完成：${parentAreas.length} 个产品组，初始 ${(catalog.server_list || []).length} 台服务器`);
+
+      const allServers = [...(catalog.server_list || [])];
+      const seenServerIds = new Set(allServers.map((s) => String(s.id)));
+      const allChildAreas = [...(catalog.child_area_list || [])];
+      const seenChildIds = new Set(allChildAreas.map((c) => String(c.id)));
+      const allNetlineLists = { ...(catalog.netline_list || {}) };
+
+      // Step 2: iterate parent areas
+      for (const parent of parentAreas) {
+        const pt0 = Date.now();
+        try {
+          await log('info', 'parent_area', `拉取产品组: ${parent.name} (ID=${parent.id})`);
+          const data = await fetchFastmosOne(parent.id, '0', '0');
+          const childCount = (data.child_area_list || []).length;
+          const srvCount = (data.server_list || []).length;
+
+          for (const child of (data.child_area_list || [])) {
+            const cid = String(child.id);
+            if (!seenChildIds.has(cid)) { seenChildIds.add(cid); allChildAreas.push(child); }
+          }
+          for (const server of (data.server_list || [])) {
+            const sid = String(server.id);
+            if (!seenServerIds.has(sid)) { seenServerIds.add(sid); allServers.push(server); }
+          }
+          if (data.netline_list) Object.assign(allNetlineLists, data.netline_list || {});
+
+          await log('info', 'parent_area', `产品组 ${parent.name} 完成：${srvCount} 台，${childCount} 子区域，${Date.now() - pt0}ms`);
+        } catch (err) {
+          await log('warn', 'parent_area', `产品组 ${parent.name} 失败: ${err.message}`);
+        }
+      }
+
+      // Step 3: iterate child areas
+      for (const child of allChildAreas) {
+        if (String(child.status || '1') !== '1') continue;
+        const ct0 = Date.now();
+        try {
+          await log('info', 'child_area', `拉取线路: ${child.name} (ID=${child.id})`);
+          const data = await fetchFastmosOne(child.id, child.parent_id || '0', '0');
+          const srvCount = (data.server_list || []).length;
+          for (const server of (data.server_list || [])) {
+            const sid = String(server.id);
+            if (!seenServerIds.has(sid)) { seenServerIds.add(sid); allServers.push(server); }
+          }
+          await log('info', 'child_area', `线路 ${child.name} 完成：${srvCount} 台，${Date.now() - ct0}ms`);
+        } catch (err) {
+          await log('warn', 'child_area', `线路 ${child.name} 失败: ${err.message}`);
+        }
+      }
+
+      // Step 4: write to DB
+      await log('info', 'db_write', `开始写入数据库：${allServers.length} 台服务器`);
+      const { childAreaMap, parentNameByChildId, areaNetlineMap } = buildAreaMaps(
+        catalog.area_list, allChildAreas, allNetlineLists
+      );
+      const servers = allServers;
+      const currentUpstreamIds = new Set();
+      let newCount = 0, changedCount = 0;
 
       for (const server of servers) {
         const upstreamId = String(server.id);
@@ -1209,25 +1281,16 @@ export function createApp() {
         const netline = areaNetlineMap[childId] || null;
         const priceMonthly = parsePriceCents(server.price_show);
 
-        const data = {
-          sourceId: source.id,
-          upstreamId,
-          title: server.title || '',
-          areaGroup,
-          area,
-          areaId: childId,
-          netline,
+        const entry = {
+          sourceId: source.id, upstreamId, title: server.title || '',
+          areaGroup, area, areaId: childId, netline,
           netDesc: stripHtml(cfg.net_desc || '') || null,
-          cpu: cfg.cpus_sn || null,
-          cpuCount: parseInt(cfg.cpus, 10) || null,
+          cpu: cfg.cpus_sn || null, cpuCount: parseInt(cfg.cpus, 10) || null,
           memory: cfg.mem_start ? `${cfg.mem_start}MB` : null,
           disk: cfg.disk ? `${cfg.disk}GB` : null,
-          diskNum: parseInt(cfg.disk_num, 10) || null,
-          diskSn: cfg.disk_sn || null,
-          bandwidth: cfg.net ? `${cfg.net}M` : null,
-          defense: cfg.def || null,
-          priceMonthly,
-          priceShow: server.price_show || null,
+          diskNum: parseInt(cfg.disk_num, 10) || null, diskSn: cfg.disk_sn || null,
+          bandwidth: cfg.net ? `${cfg.net}M` : null, defense: cfg.def || null,
+          priceMonthly, priceShow: server.price_show || null,
           priceConfig: server.price_config ? JSON.stringify(server.price_config) : null,
           stock: parseInt(server.stock, 10) || 0,
           status: server.status === '1' || server.on_sale === '1' ? 'on_sale' : 'off_sale',
@@ -1239,25 +1302,15 @@ export function createApp() {
         const existing = await prisma.upstreamServerProduct.findUnique({
           where: { sourceId_upstreamId: { sourceId: source.id, upstreamId } }
         });
-
-        if (!existing) {
-          await prisma.upstreamServerProduct.create({ data });
-          newCount++;
-        } else if (existing.normHash !== data.normHash) {
-          await prisma.upstreamServerProduct.update({
-            where: { id: existing.id },
-            data: { ...data, published: existing.published, productId: existing.productId }
-          });
+        if (!existing) { await prisma.upstreamServerProduct.create({ data: entry }); newCount++; }
+        else if (existing.normHash !== entry.normHash) {
+          await prisma.upstreamServerProduct.update({ where: { id: existing.id }, data: { ...entry, published: existing.published, productId: existing.productId } });
           changedCount++;
         } else {
-          await prisma.upstreamServerProduct.update({
-            where: { id: existing.id },
-            data: { stock: data.stock, netDesc: data.netDesc, status: data.status, priceMonthly: data.priceMonthly, priceShow: data.priceShow, sortOrder: data.sortOrder, rawJson: data.rawJson }
-          });
+          await prisma.upstreamServerProduct.update({ where: { id: existing.id }, data: { stock: entry.stock, netDesc: entry.netDesc, status: entry.status, priceMonthly: entry.priceMonthly, priceShow: entry.priceShow, sortOrder: entry.sortOrder, rawJson: entry.rawJson } });
         }
       }
 
-      // Mark products that disappeared from upstream as offline
       const allExisting = await prisma.upstreamServerProduct.findMany({ where: { sourceId: source.id } });
       let offlineCount = 0;
       for (const p of allExisting) {
@@ -1272,11 +1325,14 @@ export function createApp() {
         where: { id: run.id },
         data: { status: 'success', endedAt, fetchedCount: servers.length, newCount, changedCount, offlineCount }
       });
-
       await prisma.upstreamSource.update({ where: { id: source.id }, data: { lastSyncAt: endedAt } });
 
-      return { runId: run.id, fetched: servers.length, new: newCount, changed: changedCount, offline: offlineCount };
+      const totalMs = Date.now() - t0;
+      await log('info', 'complete', `同步完成：${servers.length} 台，新增 ${newCount}，变更 ${changedCount}，下架 ${offlineCount}，总耗时 ${(totalMs / 1000).toFixed(1)}s`);
+
+      return { runId, fetched: servers.length, new: newCount, changed: changedCount, offline: offlineCount };
     } catch (error) {
+      await log('error', 'fail', `同步失败: ${error.message}`);
       await prisma.upstreamSyncRun.update({
         where: { id: run.id },
         data: { status: 'failed', endedAt: new Date(), errorMessage: error.message, errorCount: 1 }
@@ -1286,6 +1342,11 @@ export function createApp() {
   }
 
   app.post('/api/admin/upstream/fastmos/sync', requireAdmin, asyncRoute(async (req, res) => {
+    if (_syncing) {
+      const current = await prisma.upstreamSyncRun.findFirst({ where: { status: 'running' }, orderBy: { startedAt: 'desc' } });
+      return fail(res, 40083, `已有同步任务正在执行 (runId: ${current?.id})`, 409);
+    }
+    _syncing = true;
     try {
       const result = await syncFastmosProducts();
       const source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
@@ -1293,7 +1354,37 @@ export function createApp() {
       ok(res, result);
     } catch (error) {
       fail(res, 50001, `同步失败: ${error.message}`, 502);
+    } finally {
+      _syncing = false;
     }
+  }));
+
+  app.get('/api/admin/upstream/fastmos/sync-runs', requireAdmin, asyncRoute(async (_req, res) => {
+    const runs = await prisma.upstreamSyncRun.findMany({
+      orderBy: { startedAt: 'desc' }, take: 20
+    });
+    ok(res, runs);
+  }));
+
+  app.get('/api/admin/upstream/fastmos/sync-runs/:runId/logs', requireAdmin, asyncRoute(async (req, res) => {
+    const logs = await prisma.upstreamSyncLog.findMany({
+      where: { runId: req.params.runId },
+      orderBy: { createdAt: 'asc' }
+    });
+    ok(res, logs);
+  }));
+
+  app.get('/api/admin/upstream/fastmos/sync-current', requireAdmin, asyncRoute(async (_req, res) => {
+    const current = await prisma.upstreamSyncRun.findFirst({
+      where: { status: 'running' },
+      orderBy: { startedAt: 'desc' }
+    });
+    if (!current) return ok(res, null);
+    const logs = await prisma.upstreamSyncLog.findMany({
+      where: { runId: current.id },
+      orderBy: { createdAt: 'desc' }, take: 50
+    });
+    ok(res, { run: current, logs: logs.reverse(), syncing: _syncing });
   }));
 
   app.get('/api/admin/upstream/fastmos/products', requireAdmin, asyncRoute(async (_req, res) => {
@@ -1414,6 +1505,98 @@ export function createApp() {
 
     await logOperation(req, 'upstream_merge', 'upstream_source', source.id, { action, count: upstreamIds.length, ...results });
     ok(res, results);
+  }));
+
+  // ── Upstream product CRUD ──
+
+  app.get('/api/admin/upstream/fastmos/products/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const product = await prisma.upstreamServerProduct.findUnique({
+      where: { id: req.params.id },
+      include: { product: true }
+    });
+    if (!product) return fail(res, 40408, '上游产品不存在', 404);
+    ok(res, product);
+  }));
+
+  app.post('/api/admin/upstream/fastmos/products', requireAdmin, asyncRoute(async (req, res) => {
+    const source = await ensureFastmosSource();
+    const { title, areaGroup, area, areaId, netline, netDesc, cpu, cpuCount, memory, disk, diskNum, diskSn, bandwidth, defense, priceMonthly, priceShow, stock, status: ustStatus, sortOrder } = req.body;
+    if (!title) return fail(res, 40080, '标题必填');
+
+    // Compute upstreamId for manual entries
+    const upstreamId = req.body.upstreamId || `manual-${Date.now()}`;
+    const existing = await prisma.upstreamServerProduct.findUnique({
+      where: { sourceId_upstreamId: { sourceId: source.id, upstreamId } }
+    });
+    if (existing) return fail(res, 40081, `上游ID "${upstreamId}" 已存在`);
+
+    const normFields = [title, areaGroup || '', cpu || '', String(cpuCount || 1), memory || '', disk || '', String(diskNum || 1), diskSn || '', bandwidth || '', netDesc || '', priceShow || '', String(stock ?? ''), ustStatus || 'on_sale', netline || ''];
+    const normHash = crypto.createHash('sha256').update(normFields.join('|')).digest('hex').slice(0, 16);
+
+    const product = await prisma.upstreamServerProduct.create({
+      data: {
+        sourceId: source.id, upstreamId, title, areaGroup: areaGroup || null, area: area || null,
+        areaId: areaId || null, netline: netline || null, netDesc: netDesc || null,
+        cpu: cpu || null, cpuCount: parseInt(cpuCount, 10) || null,
+        memory: memory || null, disk: disk || null, diskNum: parseInt(diskNum, 10) || null,
+        diskSn: diskSn || null, bandwidth: bandwidth || null, defense: defense || null,
+        priceMonthly: priceMonthly ? parseInt(priceMonthly, 10) : null, priceShow: priceShow || null,
+        stock: stock != null ? parseInt(stock, 10) : 0,
+        status: ustStatus || 'on_sale', sortOrder: parseInt(sortOrder, 10) || 0,
+        normHash, rawJson: JSON.stringify({ manual: true, createdAt: new Date().toISOString() })
+      }
+    });
+    await logOperation(req, 'create_upstream_product', 'upstream_product', product.id, { upstreamId });
+    ok(res, product);
+  }));
+
+  app.put('/api/admin/upstream/fastmos/products/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const existing = await prisma.upstreamServerProduct.findUnique({ where: { id: req.params.id } });
+    if (!existing) return fail(res, 40408, '上游产品不存在', 404);
+
+    const data = {};
+    const stringFields = ['title', 'areaGroup', 'area', 'areaId', 'netline', 'netDesc', 'cpu', 'memory', 'disk', 'diskSn', 'bandwidth', 'defense', 'priceShow', 'status'];
+    for (const f of stringFields) {
+      if (req.body[f] !== undefined) data[f] = req.body[f] || null;
+    }
+    const intFields = ['cpuCount', 'diskNum', 'priceMonthly', 'stock', 'sortOrder'];
+    for (const f of intFields) {
+      if (req.body[f] !== undefined) data[f] = parseInt(req.body[f], 10) || null;
+    }
+
+    // Recompute normHash
+    const normFields = [data.title || existing.title, data.areaGroup || existing.areaGroup || '', data.cpu || existing.cpu || '', String(data.cpuCount ?? existing.cpuCount ?? 1), data.memory || existing.memory || '', data.disk || existing.disk || '', String(data.diskNum ?? existing.diskNum ?? 1), data.diskSn || existing.diskSn || '', data.bandwidth || existing.bandwidth || '', data.netDesc || existing.netDesc || '', data.priceShow || existing.priceShow || '', String(data.stock ?? existing.stock ?? ''), data.status || existing.status || 'on_sale', data.netline || existing.netline || ''];
+    data.normHash = crypto.createHash('sha256').update(normFields.join('|')).digest('hex').slice(0, 16);
+
+    const updated = await prisma.upstreamServerProduct.update({ where: { id: req.params.id }, data });
+    await logOperation(req, 'update_upstream_product', 'upstream_product', updated.id, req.body);
+    ok(res, updated);
+  }));
+
+  app.delete('/api/admin/upstream/fastmos/products/:id', requireAdmin, asyncRoute(async (req, res) => {
+    const existing = await prisma.upstreamServerProduct.findUnique({
+      where: { id: req.params.id }, include: { product: { include: { orders: { select: { id: true } } } } }
+    });
+    if (!existing) return fail(res, 40408, '上游产品不存在', 404);
+
+    const action = req.body.action || 'offline';
+    if (existing.productId && action !== 'force') {
+      const orderCount = existing.product?.orders?.length || 0;
+      return fail(res, 40082, `有关联产品(${orderCount}个订单)，建议"下架"或"解绑后删除"`, 409);
+    }
+
+    if (action === 'offline' || (existing.productId && action === 'unlink-delete')) {
+      if (existing.productId) {
+        await prisma.upstreamServerProduct.update({ where: { id: existing.id }, data: { productId: null, published: false } });
+      }
+      await prisma.upstreamServerProduct.update({ where: { id: existing.id }, data: { status: 'offline' } });
+      await logOperation(req, 'offline_upstream_product', 'upstream_product', existing.id, { action });
+      return ok(res, { action: 'offline', id: existing.id });
+    }
+
+    await prisma.upstreamServerProduct.delete({ where: { id: existing.id } });
+    await logOperation(req, 'delete_upstream_product', 'upstream_product', existing.id, { upstreamId: existing.upstreamId });
+    ok(res, { action: 'deleted', id: existing.id });
   }));
 
   // ── Public server products (published upstream products for frontend) ──
@@ -1567,9 +1750,11 @@ export function createApp() {
 
   // ── Auto-sync on first startup (empty upstream table) ──
   setTimeout(async () => {
+    if (_syncing) return;
     try {
       const count = await prisma.upstreamServerProduct.count();
       if (count === 0) {
+        _syncing = true;
         console.log('[auto-sync] Upstream table empty, triggering initial sync...');
         const result = await syncFastmosProducts();
         console.log(`[auto-sync] Initial sync complete: fetched=${result.fetched} new=${result.new}`);

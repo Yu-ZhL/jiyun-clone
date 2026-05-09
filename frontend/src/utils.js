@@ -27,7 +27,14 @@ export const defaultSiteSettings = {
   sales_contact_text: '请通过以下方式联系客服，我们将为您开通所需服务器配置。',
   sales_contact_phone: '+852 800-888-888',
   sales_contact_wechat: 'jiyun_support',
-  sales_contact_qr_url: ''
+  sales_contact_qr_url: '',
+  sales_contact_phone_enabled: 'true',
+  sales_contact_wechat_enabled: 'true',
+  sales_contact_email_enabled: 'true',
+  sales_contact_telegram_enabled: 'false',
+  sales_contact_qr_enabled: 'true',
+  sales_contact_telegram: '@your_support',
+  sales_contact_telegram_url: ''
 };
 
 export function stripHtml(html) {

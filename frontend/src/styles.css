@@ -3393,6 +3393,25 @@ th {
 .contact-info-item strong {
   color: var(--text);
 }
+.contact-info-icon {
+  display: flex;
+  align-items: center;
+  color: var(--primary);
+  flex-shrink: 0;
+}
+.contact-info-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+.contact-info-link:hover {
+  text-decoration: underline;
+}
+.contact-qr-icon {
+  display: block;
+  margin: 0 auto 8px;
+  color: var(--muted);
+}
 
 /* ===== DataTable Pagination ===== */
 .dt-pagination {
@@ -3521,4 +3540,83 @@ th {
 .upstream-merge-actions .secondary {
   min-height: 38px;
   font-size: 0.9rem;
+}
+
+/* Sync progress */
+.admin-upstream-sync-progress {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  padding: 12px 18px;
+  margin-bottom: 16px;
+}
+.sync-progress-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 0.9rem;
+  color: var(--text);
+}
+
+/* Sync log viewer */
+.admin-upstream-log-viewer {
+  max-height: 50vh;
+  overflow: auto;
+}
+.sync-log-meta {
+  display: flex;
+  gap: 18px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.sync-log-list {
+  display: grid;
+  gap: 4px;
+}
+.sync-log-line {
+  display: grid;
+  grid-template-columns: 70px 38px 80px 1fr;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 0.82rem;
+  align-items: baseline;
+}
+.sync-log-line:nth-child(even) { background: #f8fafc; }
+.sync-log-line.warn { background: #fffbeb; }
+.sync-log-line.error { background: #fef2f2; }
+.sync-log-time { color: var(--muted); font-family: monospace; }
+.sync-log-level { font-weight: 700; text-transform: uppercase; font-size: 0.7rem; }
+.sync-log-level.info { color: var(--primary); }
+.sync-log-level.warn { color: #d97706; }
+.sync-log-level.error { color: var(--red); }
+.sync-log-step { color: var(--muted); }
+.sync-log-msg { color: var(--text); white-space: normal; word-break: break-word; }
+
+/* CRUD form fieldsets */
+.modal-form fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 14px;
+  margin: 0;
+}
+.modal-form fieldset legend {
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: var(--muted);
+  padding: 0 6px;
+}
+
+/* Detail grid */
+.admin-upstream-detail .detail-grid {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px 14px;
+}
+.admin-upstream-detail .detail-grid span {
+  color: var(--muted);
+  font-size: 0.85rem;
 }

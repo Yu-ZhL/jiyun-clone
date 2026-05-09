@@ -79,6 +79,13 @@ async function main() {
     sales_contact_phone: '+852 800-888-888',
     sales_contact_wechat: 'jiyun_support',
     sales_contact_qr_url: '',
+    sales_contact_phone_enabled: 'true',
+    sales_contact_wechat_enabled: 'true',
+    sales_contact_email_enabled: 'true',
+    sales_contact_telegram_enabled: 'false',
+    sales_contact_qr_enabled: 'true',
+    sales_contact_telegram: '@your_support',
+    sales_contact_telegram_url: '',
     operation_log_retention_days: '90'
   };
 

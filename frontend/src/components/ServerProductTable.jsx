@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Mail, MessageCircle, Phone, QrCode, Send } from 'lucide-react';
 
 function dollars(cents) {
   if (cents == null) return '-';
@@ -129,6 +130,10 @@ export function ServerProductTable({ groups, areas, products, onOpenContact }) {
   );
 }
 
+function isEnabled(val) {
+  return val === 'true' || val === true;
+}
+
 export function ContactModal({ product, siteSettings, onClose }) {
   const cfg = [
     { label: '产品组', value: product?.areaGroup || '-' },
@@ -139,6 +144,23 @@ export function ContactModal({ product, siteSettings, onClose }) {
     { label: '带宽', value: product?.bandwidth || '-' },
     { label: '月付价格', value: dollars(product?.priceMonthly) + '/月' }
   ];
+
+  const contacts = [];
+  if (isEnabled(siteSettings.sales_contact_phone_enabled) && siteSettings.sales_contact_phone) {
+    contacts.push({ icon: <Phone size={18} />, label: '电话', value: siteSettings.sales_contact_phone, href: `tel:${siteSettings.sales_contact_phone.replace(/[^0-9+]/g, '')}` });
+  }
+  if (isEnabled(siteSettings.sales_contact_wechat_enabled) && siteSettings.sales_contact_wechat) {
+    contacts.push({ icon: <MessageCircle size={18} />, label: '微信', value: siteSettings.sales_contact_wechat });
+  }
+  if (isEnabled(siteSettings.sales_contact_email_enabled) && siteSettings.support_email) {
+    contacts.push({ icon: <Mail size={18} />, label: '邮箱', value: siteSettings.support_email, href: `mailto:${siteSettings.support_email}` });
+  }
+  if (isEnabled(siteSettings.sales_contact_telegram_enabled) && siteSettings.sales_contact_telegram) {
+    contacts.push({
+      icon: <Send size={18} />, label: 'Telegram', value: siteSettings.sales_contact_telegram,
+      href: siteSettings.sales_contact_telegram_url || null
+    });
+  }
 
   return (
     <div className="modal-backdrop" role="presentation">
@@ -164,31 +186,25 @@ export function ContactModal({ product, siteSettings, onClose }) {
           </div>
         )}
 
-        {siteSettings.sales_contact_qr_url && (
+        {isEnabled(siteSettings.sales_contact_qr_enabled) && siteSettings.sales_contact_qr_url && (
           <div className="contact-qr-wrap">
+            <QrCode size={18} className="contact-qr-icon" />
             <img src={siteSettings.sales_contact_qr_url} alt="客服二维码" className="contact-qr-img" />
           </div>
         )}
 
         <div className="contact-info-list">
-          {siteSettings.sales_contact_phone && (
-            <div className="contact-info-item">
-              <span className="contact-info-label">电话</span>
-              <strong>{siteSettings.sales_contact_phone}</strong>
+          {contacts.map((c) => (
+            <div key={c.label} className="contact-info-item">
+              <span className="contact-info-icon">{c.icon}</span>
+              <span className="contact-info-label">{c.label}</span>
+              {c.href ? (
+                <a href={c.href} target="_blank" rel="noopener noreferrer" className="contact-info-link">{c.value}</a>
+              ) : (
+                <strong>{c.value}</strong>
+              )}
             </div>
-          )}
-          {siteSettings.sales_contact_wechat && (
-            <div className="contact-info-item">
-              <span className="contact-info-label">微信</span>
-              <strong>{siteSettings.sales_contact_wechat}</strong>
-            </div>
-          )}
-          {siteSettings.support_email && (
-            <div className="contact-info-item">
-              <span className="contact-info-label">邮箱</span>
-              <strong>{siteSettings.support_email}</strong>
-            </div>
-          )}
+          ))}
         </div>
 
         <button className="primary wide" onClick={onClose} style={{ marginTop: 18 }}>我知道了</button>
