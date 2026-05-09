@@ -1526,7 +1526,18 @@ export function createApp() {
       ]);
     }
 
-    let deleted = 0, archived = 0, skipped = 0;
+    let deleted = 0, archived = 0, skipped = 0, upstreamDeleted = 0;
+    const includeUpstream = scope === 'all' || req.body.includeUpstream === true;
+
+    if (includeUpstream) {
+      if (forceClean) {
+        // Unlink upstream→product references before deleting upstream records
+        await prisma.upstreamServerProduct.updateMany({ data: { productId: null, published: false } });
+      }
+      const result = await prisma.upstreamServerProduct.deleteMany();
+      upstreamDeleted = result.count;
+    }
+
     const products = await prisma.product.findMany({ include: { orders: { select: { id: true } }, servers: { select: { id: true } } } });
 
     for (const p of products) {
@@ -1543,8 +1554,8 @@ export function createApp() {
       }
     }
 
-    await logOperation(req, 'clear_all_products', 'product', null, { deleted, archived, skipped, scope });
-    ok(res, { deleted, archived, skipped });
+    await logOperation(req, 'clear_all_products', 'product', null, { deleted, archived, skipped, upstreamDeleted, scope });
+    ok(res, { deleted, archived, skipped, upstreamDeleted });
   }));
 
   // ── Fetch-preview (phase A: fetch upstream, store to preview table) ──

@@ -845,7 +845,13 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
             <select className="admin-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option><option value="offline">已下线</option></select>
             <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
           </div>
-          <DataTable pagination columns={['', '产品信息', '产品组/线路', '配置', '价格', '库存', '发布状态', '操作']}
+          <DataTable pagination columns={[
+            <input type="checkbox" onChange={(e) => {
+              const all = upProducts.filter(p => { /* apply same filters */ return true; });
+              if (e.target.checked) setSelected(new Set(all.map(p => p.upstreamId)));
+              else setSelected(new Set());
+            }} title="全选" />,
+            '产品信息', '产品组/线路', '配置', '价格', '库存', '发布状态', '操作']}
             rows={upProducts.filter(p => {
               if (filterGroup && (p.areaGroup || '') !== filterGroup) return false;
               if (filterStatus && p.status !== filterStatus) return false;
@@ -1122,13 +1128,14 @@ function ClearAllProductsPanel({ api, setNotice, load }) {
   const [confirmText, setConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
   const [forceClean, setForceClean] = useState(true);
+  const [includeUpstream, setIncludeUpstream] = useState(false);
 
   const doClear = async (e) => {
     e.preventDefault();
     if (confirmText !== 'CLEAR_PRODUCTS') { setNotice('请正确输入确认文本 CLEAR_PRODUCTS'); return; }
     setClearing(true);
     try {
-      const result = await api('/api/admin/products/clear-all', { method: 'POST', body: { password, confirmText, scope: 'local', forceCleanBusinessData: forceClean } });
+      const result = await api('/api/admin/products/clear-all', { method: 'POST', body: { password, confirmText, scope: includeUpstream ? 'all' : 'local', forceCleanBusinessData: forceClean, includeUpstream } });
       setNotice(`已清空：删除 ${result.deleted} 个，归档 ${result.archived} 个，跳过 ${result.skipped} 个`);
       setPassword(''); setConfirmText('');
       await load();
@@ -1142,6 +1149,7 @@ function ClearAllProductsPanel({ api, setNotice, load }) {
       <label>管理员密码<input type="password" value={password} onChange={e => setPassword(e.target.value)} required /></label>
       <label>输入 CLEAR_PRODUCTS 确认<input value={confirmText} onChange={e => setConfirmText(e.target.value)} placeholder="CLEAR_PRODUCTS" required /></label>
       <label className="remember"><input type="checkbox" checked={forceClean} onChange={e => setForceClean(e.target.checked)} /> 同时清理关联的订单/服务器/钱包流水（级联删除）</label>
+      <label className="remember"><input type="checkbox" checked={includeUpstream} onChange={e => setIncludeUpstream(e.target.checked)} /> 同时清空上游产品（/servers 将无数据展示）</label>
       <button className="primary" type="submit" disabled={clearing} style={{ background: 'var(--red)' }}>{clearing ? '执行中...' : '确认清空所有产品'}</button>
     </form>
   );
@@ -1525,12 +1533,12 @@ function AdminUpstream({ api, setNotice, load }) {
 
       {/* Filters & search */}
       <div className="admin-upstream-filters">
-        <select value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)}>
+        <select className="admin-select" value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)}>
           <option value="">全部产品组</option>
           {groups.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
         {diffTab !== 'localOnly' && (
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <select className="admin-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             <option value="">全部状态</option>
             <option value="on_sale">在售</option>
             <option value="off_sale">下架</option>
