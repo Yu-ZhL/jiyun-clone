@@ -9,8 +9,8 @@ import {
 } from '../utils';
 import {
   ActionGroup, DataTable, Metric, Modal, OrderDetailModal, OrderNumberCell,
-  OrderProductCell, NotificationTitle, Panel, Rows, ServerCards, StatusPill,
-  ClientTicketDetail
+  OrderProductCell, NotificationTitle, Panel, Rows, ServerCards, ServerDetailModal,
+  StatusPill, ClientTicketDetail
 } from './SharedUI';
 
 function ClientPortal(props) {
@@ -67,6 +67,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
   const [ticket, setTicket] = useState({ title: '', content: '' });
   const [orderDetail, setOrderDetail] = useState(null);
   const [highlightedServerId, setHighlightedServerId] = useState('');
+  const [serverDetail, setServerDetail] = useState(null);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const clientMenu = [
     ['overview', LayoutDashboard, '总览'],
@@ -218,7 +219,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
             </div>
           </>
         )}
-        {section === 'servers' && <Panel title="我的服务器"><ServerCards servers={data.servers} highlightedServerId={highlightedServerId} renew={renew} /></Panel>}
+        {section === 'servers' && <Panel title="我的服务器"><ServerCards servers={data.servers} highlightedServerId={highlightedServerId} renew={renew} onViewDetail={setServerDetail} /></Panel>}
         {section === 'orders' && <Panel title="订单记录"><DataTable columns={['订单', '产品与消息', '类型', '金额', '支付状态', '开通状态', '操作']} rows={data.orders.map((order) => [
           <OrderNumberCell order={order} />,
           <OrderProductCell order={order} />,
@@ -258,6 +259,7 @@ function ClientDashboard({ user, navigate, setNotice, refreshUser, route }) {
           item.readAt ? '-' : <button className="table-action" onClick={() => markNotificationRead(item.id)}>标记已读</button>
         ])} /></Panel>}
         {orderDetail && <OrderDetailModal order={orderDetail} server={getOrderServer(orderDetail)} onClose={() => setOrderDetail(null)} showServer={() => showOrderServer(orderDetail)} pay={pay} />}
+        {serverDetail && <ServerDetailModal server={serverDetail} onClose={() => setServerDetail(null)} />}
       </section>
     </main>
   );

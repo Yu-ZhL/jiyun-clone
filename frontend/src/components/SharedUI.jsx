@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import {
-  ChevronLeft,
-  MessageSquare,
-  X
+  Check, ChevronDown, ChevronLeft, Copy, Eye,
+  MessageSquare, X
 } from 'lucide-react';
 import { formatDate, formatMoney, orderTypeLabels, payStatusLabels, provisionStatusLabels, serverStatusLabels, ticketStatusLabels } from '../utils';
 
@@ -12,6 +11,42 @@ export function UserIdentity({ user, compact = false }) {
     <div className={`identity-cell ${compact ? 'compact' : ''}`}>
       <span className="identity-avatar">{user.username?.slice(0, 1).toUpperCase() || 'U'}</span>
       <span><strong>{user.username}</strong><small>ID {user.id?.slice(-6) || '-'}</small></span>
+    </div>
+  );
+}
+
+function CompactSelect({ value, onChange, options, ariaLabel = '选择' }) {
+  const [open, setOpen] = useState(false);
+  const selected = options.find((option) => String(option.value) === String(value)) || options[0];
+  return (
+    <div className="admin-select-control dt-page-size-control" onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
+      <button type="button" className="admin-select-trigger" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((next) => !next)}>
+        <span>{selected?.label || '-'}</span>
+        <ChevronDown size={15} />
+      </button>
+      {open && (
+        <div className="admin-select-menu" role="listbox" tabIndex={-1}>
+          {options.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              className={`admin-select-option ${String(option.value) === String(value) ? 'selected' : ''}`}
+              role="option"
+              aria-selected={String(option.value) === String(value)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+              {String(option.value) === String(value) && <Check size={14} />}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -71,13 +106,15 @@ export function NotificationTitle({ item }) {
   );
 }
 
-export function ServerCards({ servers, highlightedServerId, renew }) {
+export function ServerCards({ servers, highlightedServerId, renew, onViewDetail }) {
   if (!servers.length) return <p className="muted">暂无服务器</p>;
   return (
     <div className="server-card-grid">
       {servers.map((server) => {
         const relatedOrders = [server.order, ...(server.orders || [])].filter(Boolean);
         const latestMessage = server.order?.notifications?.[0];
+        const location = [server.region, server.networkLine].filter(Boolean).join(' / ');
+        const specs = [server.bandwidth, server.defense].filter(Boolean).join(' / ');
         return (
           <article className={`server-card ${highlightedServerId === server.id ? 'highlight' : ''}`} key={server.id}>
             <div className="server-card-head">
@@ -88,20 +125,105 @@ export function ServerCards({ servers, highlightedServerId, renew }) {
               <StatusPill value={server.status} labels={serverStatusLabels} />
             </div>
             <div className="server-kv">
-              <span>IP 地址</span><strong>{server.ip}</strong>
+              <span>主 IP</span><strong><span className="copyable" title="点击复制" onClick={() => navigator.clipboard.writeText(server.ip)}>{server.ip}</span></strong>
+              {server.ipv6 && <><span>IPv6</span><strong>{server.ipv6}</strong></>}
+              {location && <><span>地区/线路</span><strong>{location}</strong></>}
               <span>系统</span><strong>{server.os || '-'}</strong>
-              <span>登录信息</span><strong>{server.loginUser} / {server.loginPassword}</strong>
+              <span>SSH</span><strong>{server.loginUser} / {server.loginPassword} {server.sshPort && server.sshPort !== 22 ? `:${server.sshPort}` : ''}</strong>
+              {specs && <><span>带宽/防御</span><strong>{specs}</strong></>}
               <span>到期时间</span><strong>{formatDate(server.expiresAt)}</strong>
               <span>关联订单</span><strong>{relatedOrders.map((order) => order.orderNo).join(' / ') || '-'}</strong>
             </div>
             {latestMessage && <div className="message-preview server-message"><MessageSquare size={14} /><span>{latestMessage.content}</span></div>}
             <div className="server-card-actions">
+              {onViewDetail && <button className="table-action" onClick={() => onViewDetail(server)}><Eye size={15} />查看详情</button>}
               <button className="table-action" onClick={() => renew(server.id)}>续费</button>
             </div>
           </article>
         );
       })}
     </div>
+  );
+}
+
+export function ServerDetailModal({ server, onClose }) {
+  const [copied, setCopied] = useState('');
+  const copy = async (text, label) => {
+    try { await navigator.clipboard.writeText(text); setCopied(label); setTimeout(() => setCopied(''), 2000); } catch { /* ignore */ }
+  };
+  const CopyBtn = ({ text, label }) => (
+    <button className="copy-btn" title={`复制${label}`} onClick={() => copy(text, label)}>
+      {copied === label ? <><Check size={13} />已复制</> : <><Copy size={13} />复制</>}
+    </button>
+  );
+  const Kv = ({ label, value, copyable }) => (
+    <div className="sdetail-kv">
+      <span>{label}</span>
+      <div className="sdetail-value">
+        <strong>{value || '-'}</strong>
+        {copyable && value && <CopyBtn text={value} label={label} />}
+      </div>
+    </div>
+  );
+
+  return (
+    <Modal title={`服务器详情：${server.name}`} onClose={onClose}>
+      <div className="server-detail">
+        <div className="sdetail-section">
+          <h3>基础信息</h3>
+          <Kv label="服务器名称" value={server.name} />
+          <Kv label="产品" value={server.product?.name} />
+          <Kv label="状态" value={serverStatusLabels[server.status] || server.status} />
+          <Kv label="主 IP" value={server.ip} copyable />
+          <Kv label="IPv6" value={server.ipv6} copyable />
+          <Kv label="附加 IP" value={server.extraIps} />
+          <Kv label="系统" value={server.os} />
+        </div>
+
+        <div className="sdetail-section">
+          <h3>登录信息</h3>
+          <Kv label="SSH 用户" value={server.loginUser} />
+          <Kv label="SSH 密码" value={server.loginPassword} copyable />
+          <Kv label="SSH 端口" value={String(server.sshPort ?? 22)} />
+        </div>
+
+        {server.panelUrl && (
+          <div className="sdetail-section">
+            <h3>控制面板</h3>
+            <Kv label="面板地址" value={server.panelUrl} copyable />
+            <Kv label="面板账号" value={server.panelUser} />
+            <Kv label="面板密码" value={server.panelPassword} copyable />
+          </div>
+        )}
+
+        <div className="sdetail-section">
+          <h3>网络资源</h3>
+          <Kv label="地区" value={server.region} />
+          <Kv label="线路" value={server.networkLine} />
+          <Kv label="带宽" value={server.bandwidth} />
+          <Kv label="防御" value={server.defense} />
+          <Kv label="DNS / Nameserver" value={server.nameservers} />
+        </div>
+
+        {server.deliveryNote && (
+          <div className="sdetail-section">
+            <h3>开通说明</h3>
+            <p className="sdetail-note">{server.deliveryNote}</p>
+          </div>
+        )}
+
+        <div className="sdetail-section">
+          <h3>时间</h3>
+          <Kv label="开通时间" value={formatDate(server.openedAt)} />
+          <Kv label="到期时间" value={formatDate(server.expiresAt)} />
+        </div>
+
+        <div className="sdetail-section">
+          <h3>关联订单</h3>
+          <Kv label="订单号" value={server.order?.orderNo || server.orderId || '-'} />
+        </div>
+      </div>
+    </Modal>
   );
 }
 
@@ -119,8 +241,20 @@ export function OrderDetailModal({ order, server, onClose, showServer, pay }) {
           <span>开通状态</span><StatusPill value={order.provisionStatus} labels={provisionStatusLabels} />
           <span>创建时间</span><strong>{formatDate(order.createdAt)}</strong>
           <span>支付时间</span><strong>{formatDate(order.paidAt)}</strong>
-          <span>关联服务器</span><strong>{server ? `${server.name || '-'} / ${server.ip || '-'}` : '-'}</strong>
+          <span>关联服务器</span><strong>{server ? `${server.name || '-'} / ${server.ip || '-'}` : (order.provisionStatus === 'opened' ? '已开通（请在"我的服务器"查看）' : '-')}</strong>
         </div>
+        {server && order.provisionStatus === 'opened' && (
+          <div className="detail-section">
+            <h3>服务器交付摘要</h3>
+            <div className="detail-grid">
+              <span>名称</span><strong>{server.name || '-'}</strong>
+              <span>IP</span><strong>{server.ip || '-'}</strong>
+              <span>系统</span><strong>{server.os || '-'}</strong>
+              <span>到期</span><strong>{formatDate(server.expiresAt)}</strong>
+              {server.panelUrl && <><span>面板</span><strong>{server.panelUrl}</strong></>}
+            </div>
+          </div>
+        )}
         <div className="detail-section">
           <h3>订单消息</h3>
           {messages.length ? messages.map((message) => (
@@ -273,9 +407,7 @@ export function DataTable({ columns, rows, pagination, pageSize: pageSizeProp, d
       <div className="dt-pagination">
         <span className="dt-page-info">第 {start + 1}-{Math.min(start + pageSize, rows.length)} 条 / 共 {rows.length} 条</span>
         <div className="dt-page-controls">
-          <select className="dt-page-size admin-select" value={pageSize} onChange={(e) => { setPageSize(Number(e.target.value)); setPage(1); }}>
-            {pageSizeOptions.map((n) => <option key={n} value={n}>{n} 条/页</option>)}
-          </select>
+          <CompactSelect value={pageSize} ariaLabel="每页条数" options={pageSizeOptions.map((n) => ({ value: n, label: `${n} 条/页` }))} onChange={(value) => { setPageSize(Number(value)); setPage(1); }} />
           <button disabled={safePage <= 1} onClick={() => setPage(safePage - 1)}>上一页</button>
           {pages.map((p, i) => (
             p === '...' ? <span key={`dot-${i}`} className="dt-page-dot">...</span> :

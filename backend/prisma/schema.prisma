@@ -173,6 +173,18 @@ model Server {
   loginUser              String
   loginPasswordEncrypted String    @db.Text
   panelUrl               String?
+  sshPort                Int?      @default(22)
+  panelUser              String?
+  panelPasswordEncrypted String?   @db.Text
+  bandwidth              String?
+  defense                String?
+  region                 String?
+  networkLine            String?
+  ipv6                   String?
+  extraIps               String?   @db.Text
+  nameservers            String?   @db.Text
+  deliveryNote           String?   @db.Text
+  adminNote              String?   @db.Text
   status                 String    @default("pending")
   openedAt               DateTime?
   expiresAt              DateTime

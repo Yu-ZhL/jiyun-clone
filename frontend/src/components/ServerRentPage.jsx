@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ServerProductTable, ContactModal } from './ServerProductTable';
 
-export function ServerRentPage({ navigate, api, siteSettings }) {
+export function ServerRentPage({ navigate, api, siteSettings, user }) {
   const [data, setData] = useState({ groups: [], areas: [], products: [], needsSync: false });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -67,6 +67,7 @@ export function ServerRentPage({ navigate, api, siteSettings }) {
         <ContactModal
           product={contactProduct}
           siteSettings={siteSettings}
+          user={user}
           onClose={() => setContactProduct(null)}
         />
       )}

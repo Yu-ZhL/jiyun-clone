@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  Bell, Boxes, CircleDollarSign, Cloud, LayoutDashboard,
+  Bell, Boxes, Check, ChevronDown, CircleDollarSign, Cloud, LayoutDashboard,
   MessageSquare, PackagePlus, Plus, ReceiptText, RefreshCw, Search,
   Server, Settings, Ticket, User, Users
 } from 'lucide-react';
@@ -46,13 +46,53 @@ function AdminLogin({ refreshAdmin, setNotice }) {
   );
 }
 
+function AdminSelect({ value, onChange, options, ariaLabel = '选择', className = '' }) {
+  const [open, setOpen] = useState(false);
+  const normalized = options.map((option) => Array.isArray(option)
+    ? { value: option[0], label: option[1] }
+    : option);
+  const selected = normalized.find((option) => String(option.value) === String(value)) || normalized[0] || { value: '', label: '-' };
+
+  return (
+    <div className={`admin-select-control ${className}`} onBlur={(event) => {
+      if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+    }}>
+      <button type="button" className="admin-select-trigger" aria-label={ariaLabel} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((next) => !next)}>
+        <span>{selected.label}</span>
+        <ChevronDown size={16} />
+      </button>
+      {open && (
+        <div className="admin-select-menu" role="listbox" tabIndex={-1}>
+          {normalized.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              className={`admin-select-option ${String(option.value) === String(value) ? 'selected' : ''}`}
+              role="option"
+              aria-selected={String(option.value) === String(value)}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              <span>{option.label}</span>
+              {String(option.value) === String(value) && <Check size={15} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProducts, refreshSiteSettings, route }) {
   const section = getAdminSection(route);
   const [adminFilter, setAdminFilter] = useState('');
   const [adminMenuOpen, setAdminMenuOpen] = useState(false);
   const [data, setData] = useState({ summary: {}, users: [], products: [], orders: [], servers: [], tickets: [], logs: [], settings: [] });
   const [productForm, setProductForm] = useState(emptyProductForm);
-  const [serverForm, setServerForm] = useState({ orderId: '', name: '', ip: '', os: 'Ubuntu 22.04', loginUser: 'root', loginPassword: '', expiresAt: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) });
+  const [serverForm, setServerForm] = useState({ mode: 'order', orderId: '', userId: '', productId: '', name: '', ip: '', ipv6: '', extraIps: '', os: 'Ubuntu 22.04', loginUser: 'root', loginPassword: '', sshPort: '22', panelUrl: '', panelUser: '', panelPassword: '', region: '', networkLine: '', bandwidth: '', defense: '', nameservers: '', deliveryNote: '', adminNote: '', expiresAt: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) });
   const [rechargeForm, setRechargeForm] = useState({ open: false, user: null, amount: '', remark: '' });
   const [replyForm, setReplyForm] = useState({ open: false, ticket: null, content: '' });
   const [userForm, setUserForm] = useState({ open: false, user: null, email: '', phone: '', status: 'active' });
@@ -100,7 +140,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
     setSyncing(true);
     try {
       const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
-      setNotice(`同步完成：${result.fetched} 台，新增 ${result.new}，变更 ${result.changed}，下架 ${result.offline}`);
+      setNotice(result.runId ? '获取任务已启动，请到产品管理查看预览。' : '获取任务已提交');
       await Promise.all([loadUpstreamSummary(), load()]);
     } catch (e) { setNotice(e.message); }
     finally { setSyncing(false); }
@@ -279,13 +319,14 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
   const openProvisionFromOrder = (order) => {
     setServerForm((prev) => ({
       ...prev,
+      mode: 'order',
       orderId: order.id,
       name: order.product?.name || order.orderNo,
-      os: prev.os || 'Linux',
+      os: prev.os || 'Ubuntu 22.04',
       loginUser: prev.loginUser || 'root'
     }));
     navigate('/admin/servers');
-    setNotice(`已选择待开通订单 ${order.orderNo}，请补充 IP 和密码后开通`);
+    setNotice(`正在为订单 ${order.orderNo} 开通服务器，请填写 IP 和密码后提交`);
   };
 
   const submitOrderMessage = async (event) => {
@@ -306,10 +347,22 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
 
   const openServer = async (event) => {
     event.preventDefault();
+    const body = {};
+    if (serverForm.mode === 'order') {
+      body.orderId = serverForm.orderId;
+    } else {
+      body.userId = serverForm.userId;
+      if (serverForm.productId?.startsWith('upstream:')) body.upstreamProductId = serverForm.productId.slice('upstream:'.length);
+      else if (serverForm.productId?.startsWith('local:')) body.productId = serverForm.productId.slice('local:'.length);
+      else body.productId = serverForm.productId;
+    }
+    const copyFields = ['name', 'ip', 'ipv6', 'extraIps', 'os', 'loginUser', 'loginPassword', 'sshPort', 'panelUrl', 'panelUser', 'panelPassword', 'region', 'networkLine', 'bandwidth', 'defense', 'nameservers', 'deliveryNote', 'adminNote', 'expiresAt'];
+    for (const f of copyFields) { if (serverForm[f]) body[f] = serverForm[f]; }
     try {
-      await api('/api/admin/servers', { method: 'POST', body: serverForm });
-      setServerForm((prev) => ({ ...prev, name: '', ip: '', loginPassword: '' }));
+      await api('/api/admin/servers', { method: 'POST', body });
+      setServerForm((prev) => ({ ...prev, name: '', ip: '', loginPassword: '', panelPassword: '', ipv6: '', extraIps: '', deliveryNote: '', adminNote: '' }));
       await load();
+      setNotice('服务器已开通');
     } catch (error) {
       setNotice(error.message);
     }
@@ -321,10 +374,22 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
     values: {
       name: server.name || '',
       ip: server.ip || '',
+      ipv6: server.ipv6 || '',
+      extraIps: server.extraIps || '',
       os: server.os || '',
       loginUser: server.loginUser || '',
       loginPassword: '',
+      sshPort: String(server.sshPort ?? 22),
       panelUrl: server.panelUrl || '',
+      panelUser: server.panelUser || '',
+      panelPassword: '',
+      region: server.region || '',
+      networkLine: server.networkLine || '',
+      bandwidth: server.bandwidth || '',
+      defense: server.defense || '',
+      nameservers: server.nameservers || '',
+      deliveryNote: server.deliveryNote || '',
+      adminNote: server.adminNote || '',
       status: server.status || 'running',
       expiresAt: dateInput(server.expiresAt)
     }
@@ -438,7 +503,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
         {section === 'dashboard' && <AdminSummary summary={data.summary} runJobs={runJobs} />}
         {(section === 'products' || section === 'upstream') && <MergedProductsPage products={data.products} keyword={adminFilter} form={productForm} setForm={setProductForm} addProduct={addProduct} updateProductStatus={updateProductStatus} openProductEdit={openProductEdit} upstreamSummary={upstreamSummary} syncUpstreamOriginal={syncUpstream} cleanupTestProducts={cleanupTestProducts} syncing={syncing} navigate={navigate} api={api} setNotice={setNotice} load={load} />}
         {section === 'orders' && <AdminOrders orders={data.orders} keyword={adminFilter} markPaid={markPaid} orderAction={orderAction} openOrderMessage={(order) => setOrderMessageForm({ open: true, order, content: '' })} openProvision={openProvisionFromOrder} />}
-        {section === 'servers' && <AdminServers servers={data.servers} keyword={adminFilter} orders={pendingPaidOrders} form={serverForm} setForm={setServerForm} openServer={openServer} openServerEdit={openServerEdit} serverAction={serverAction} />}
+        {section === 'servers' && <AdminServers servers={data.servers} keyword={adminFilter} orders={pendingPaidOrders} users={data.users} products={data.products} form={serverForm} setForm={setServerForm} openServer={openServer} openServerEdit={openServerEdit} serverAction={serverAction} api={api} setNotice={setNotice} />}
         {section === 'users' && <AdminUsers users={data.users} keyword={adminFilter} openUserEdit={openUserEdit} openRecharge={(user) => setRechargeForm({ open: true, user, amount: '', remark: '后台手动充值' })} setUserStatus={setUserStatus} impersonate={impersonate} />}
         {section === 'tickets' && <AdminTickets tickets={data.tickets} keyword={adminFilter} openReply={(ticket) => setReplyForm({ open: true, ticket, content: '' })} closeTicket={closeTicket} />}
         {section === 'logs' && <AdminLogs logs={data.logs} keyword={adminFilter} settings={data.settings} settingsForm={settingsForm} setSettingsForm={setSettingsForm} saveSettings={saveSettings} />}
@@ -490,7 +555,7 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
             <form className="modal-form" onSubmit={submitUserEdit}>
               <label>邮箱<input value={userForm.email} onChange={(event) => setUserForm((prev) => ({ ...prev, email: event.target.value }))} required /></label>
               <label>电话<input value={userForm.phone} onChange={(event) => setUserForm((prev) => ({ ...prev, phone: event.target.value }))} /></label>
-              <label>状态<select className="admin-select" value={userForm.status} onChange={(event) => setUserForm((prev) => ({ ...prev, status: event.target.value }))}><option value="active">正常</option><option value="disabled">已禁用</option></select></label>
+              <label>状态<AdminSelect value={userForm.status} onChange={(value) => setUserForm((prev) => ({ ...prev, status: value }))} options={[['active', '正常'], ['disabled', '已禁用']]} ariaLabel="用户状态" /></label>
               <button className="primary" type="submit">保存用户</button>
             </form>
           </Modal>
@@ -502,15 +567,49 @@ function AdminDashboard({ admin, navigate, refreshAdmin, setNotice, refreshProdu
         )}
         {serverEditForm.open && (
           <Modal title={`编辑服务器：${serverEditForm.server.name}`} onClose={() => setServerEditForm({ open: false, server: null, values: {} })}>
-            <form className="modal-form" onSubmit={submitServerEdit}>
-              <label>名称<input value={serverEditForm.values.name || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, name: event.target.value } }))} required /></label>
-              <label>IP<input value={serverEditForm.values.ip || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, ip: event.target.value } }))} required /></label>
-              <label>系统<input value={serverEditForm.values.os || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, os: event.target.value } }))} /></label>
-              <label>登录用户<input value={serverEditForm.values.loginUser || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginUser: event.target.value } }))} /></label>
-              <label>新密码<input type="password" value={serverEditForm.values.loginPassword || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginPassword: event.target.value } }))} placeholder="不填写则不修改" /></label>
-              <label>面板地址<input value={serverEditForm.values.panelUrl || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, panelUrl: event.target.value } }))} /></label>
-              <label>状态<select className="admin-select" value={serverEditForm.values.status || 'running'} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: event.target.value } }))}><option value="running">运行中</option><option value="suspended">已暂停</option><option value="expired">已到期</option><option value="expiring">即将到期</option></select></label>
-              <label>到期时间<input type="date" value={serverEditForm.values.expiresAt || ''} onChange={(event) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, expiresAt: event.target.value } }))} /></label>
+            <form className="modal-form server-edit-form" onSubmit={submitServerEdit}>
+              <fieldset className="form-fieldset"><legend>基础信息</legend>
+                <label>名称<input value={serverEditForm.values.name || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, name: e.target.value } }))} required /></label>
+                <div className="form-row">
+                  <label>主 IP<input value={serverEditForm.values.ip || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, ip: e.target.value } }))} required /></label>
+                  <label>IPv6<input value={serverEditForm.values.ipv6 || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, ipv6: e.target.value } }))} /></label>
+                </div>
+                <label>附加 IP（多行）<textarea rows="2" value={serverEditForm.values.extraIps || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, extraIps: e.target.value } }))} /></label>
+                <div className="form-row">
+                  <label>系统<input value={serverEditForm.values.os || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, os: e.target.value } }))} /></label>
+                  <label>状态<AdminSelect value={serverEditForm.values.status || 'running'} onChange={(value) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, status: value } }))} options={[['running', '运行中'], ['suspended', '已暂停'], ['expired', '已到期'], ['expiring', '即将到期']]} ariaLabel="服务器状态" /></label>
+                </div>
+              </fieldset>
+              <fieldset className="form-fieldset"><legend>登录信息</legend>
+                <div className="form-row">
+                  <label>SSH 用户<input value={serverEditForm.values.loginUser || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginUser: e.target.value } }))} /></label>
+                  <label>SSH 端口<input type="number" min="1" max="65535" value={serverEditForm.values.sshPort || '22'} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, sshPort: e.target.value } }))} /></label>
+                </div>
+                <label>新密码（留空不修改）<input type="text" value={serverEditForm.values.loginPassword || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, loginPassword: e.target.value } }))} placeholder="不填写则不修改" /></label>
+              </fieldset>
+              <fieldset className="form-fieldset"><legend>网络资源</legend>
+                <div className="form-row">
+                  <label>地区<input value={serverEditForm.values.region || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, region: e.target.value } }))} /></label>
+                  <label>线路<input value={serverEditForm.values.networkLine || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, networkLine: e.target.value } }))} /></label>
+                </div>
+                <div className="form-row">
+                  <label>带宽<input value={serverEditForm.values.bandwidth || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, bandwidth: e.target.value } }))} /></label>
+                  <label>防御<input value={serverEditForm.values.defense || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, defense: e.target.value } }))} /></label>
+                </div>
+                <label>DNS / Nameserver（多行）<textarea rows="2" value={serverEditForm.values.nameservers || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, nameservers: e.target.value } }))} /></label>
+              </fieldset>
+              <fieldset className="form-fieldset"><legend>面板与说明</legend>
+                <label>控制面板 URL<input value={serverEditForm.values.panelUrl || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, panelUrl: e.target.value } }))} /></label>
+                <div className="form-row">
+                  <label>面板账号<input value={serverEditForm.values.panelUser || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, panelUser: e.target.value } }))} /></label>
+                  <label>面板密码（留空不修改）<input type="text" value={serverEditForm.values.panelPassword || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, panelPassword: e.target.value } }))} placeholder="不填写则不修改" /></label>
+                </div>
+                <label>给用户的开通说明<textarea rows="3" value={serverEditForm.values.deliveryNote || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, deliveryNote: e.target.value } }))} /></label>
+                <label>后台内部备注<textarea rows="2" value={serverEditForm.values.adminNote || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, adminNote: e.target.value } }))} /></label>
+              </fieldset>
+              <fieldset className="form-fieldset"><legend>到期时间</legend>
+                <label>到期时间<input type="date" value={serverEditForm.values.expiresAt || ''} onChange={(e) => setServerEditForm((prev) => ({ ...prev, values: { ...prev.values, expiresAt: e.target.value } }))} /></label>
+              </fieldset>
               <button className="primary" type="submit">保存服务器</button>
             </form>
           </Modal>
@@ -821,7 +920,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
       <div className="filter-section">
         <div className="filter-tabs">
           {pageTabs.map((t) => (
-            <button key={t} className={`filter-tab ${(tab === 'upstream' && t === '上游产品') || (tab === 'local' && t === '本站产品') || (tab === 'diff' && t === '差异处理') || (tab === 'logs' && t === '同步日志') ? 'active' : ''}`}
+            <button key={t} className={`filter-tab ${(tab === 'upstream' && t === '上游产品') || (tab === 'local' && t === '本站产品') || (tab === 'diff' && t === '差异处理') || (tab === 'preview' && t === '获取预览') || (tab === 'logs' && t === '获取记录') || (tab === 'danger' && t === '危险操作') ? 'active' : ''}`}
               onClick={() => { setTab(t === '上游产品' ? 'upstream' : t === '本站产品' ? 'local' : t === '差异处理' ? 'diff' : t === '获取预览' ? 'preview' : t === '危险操作' ? 'danger' : 'logs'); setSelected(new Set()); }}>
               {t}
             </button>
@@ -841,8 +940,8 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
             <div className="admin-upstream-status-item"><span>待下架</span><strong className="text-red">{diff.offline?.length || 0}</strong></div>
           </div>
           <div className="admin-upstream-filters">
-            <select className="admin-select" value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
-            <select className="admin-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option><option value="offline">已下线</option></select>
+            <AdminSelect value={filterGroup} onChange={setFilterGroup} options={[['', '全部产品组'], ...groups.map((group) => [group, group])]} ariaLabel="产品组筛选" />
+            <AdminSelect value={filterStatus} onChange={setFilterStatus} options={[['', '全部状态'], ['on_sale', '在售'], ['off_sale', '下架'], ['offline', '已下线']]} ariaLabel="状态筛选" />
             <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
           </div>
           <DataTable pagination columns={[
@@ -905,8 +1004,8 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
             </div>
           </div>
           <div className="admin-upstream-filters">
-            <select className="admin-select" value={filterGroup} onChange={e => setFilterGroup(e.target.value)}><option value="">全部产品组</option>{groups.map(g => <option key={g} value={g}>{g}</option>)}</select>
-            {diffTab !== 'localOnly' && <select className="admin-select" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}><option value="">全部状态</option><option value="on_sale">在售</option><option value="off_sale">下架</option></select>}
+            <AdminSelect value={filterGroup} onChange={setFilterGroup} options={[['', '全部产品组'], ...groups.map((group) => [group, group])]} ariaLabel="产品组筛选" />
+            {diffTab !== 'localOnly' && <AdminSelect value={filterStatus} onChange={setFilterStatus} options={[['', '全部状态'], ['on_sale', '在售'], ['off_sale', '下架']]} ariaLabel="状态筛选" />}
             <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}><Search size={16} /><input placeholder="搜索..." value={searchText} onChange={e => setSearchText(e.target.value)} /></div>
           </div>
 
@@ -945,7 +1044,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
               })}
             />
           ) : (
-            <div className="admin-upstream-empty"><p>{currentDiff.length === 0 ? (diffTab === 'new' ? '暂无新增，点击同步刷新。' : '暂无数据。') : '没有匹配筛选条件。'}</p></div>
+            <div className="admin-upstream-empty"><p>{currentDiff.length === 0 ? (diffTab === 'new' ? '暂无新增，点击获取上游数据刷新。' : '暂无数据。') : '没有匹配筛选条件。'}</p></div>
           )}
         </>
       )}
@@ -1064,7 +1163,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}><label>月付(分)<input type="number" value={crudForm.priceMonthly} onChange={e => setCrudForm(p => ({ ...p, priceMonthly: e.target.value }))} /></label><label>显示价格<input value={crudForm.priceShow} onChange={e => setCrudForm(p => ({ ...p, priceShow: e.target.value }))} /></label><label>库存(-1不限)<input type="number" value={crudForm.stock} onChange={e => setCrudForm(p => ({ ...p, stock: e.target.value }))} /></label></div>
             </fieldset>
             <fieldset><legend>状态</legend>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>状态<select className="admin-select" value={crudForm.status} onChange={e => setCrudForm(p => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label><label>排序<input type="number" value={crudForm.sortOrder} onChange={e => setCrudForm(p => ({ ...p, sortOrder: e.target.value }))} /></label></div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}><label>状态<AdminSelect value={crudForm.status} onChange={(value) => setCrudForm(p => ({ ...p, status: value }))} options={[['on_sale', '在售'], ['off_sale', '下架']]} ariaLabel="上游产品状态" /></label><label>排序<input type="number" value={crudForm.sortOrder} onChange={e => setCrudForm(p => ({ ...p, sortOrder: e.target.value }))} /></label></div>
             </fieldset>
             <button className="primary" type="submit" disabled={crudSaving}>{crudSaving ? '保存中...' : (editItem ? '保存修改' : '新增产品')}</button>
           </form>
@@ -1097,7 +1196,7 @@ function MergedProductsPage({ products, keyword, form, setForm, addProduct, upda
       )}
 
       {showSyncLogs && syncProgress && (
-        <Modal title={`同步日志 (${syncProgress.id?.slice(-8)})`} onClose={() => setShowSyncLogs(false)}>
+        <Modal title={`获取日志 (${syncProgress.id?.slice(-8)})`} onClose={() => setShowSyncLogs(false)}>
           <div className="admin-upstream-log-viewer">
             <div className="sync-log-meta">
               <span>状态: {syncProgress.status}</span>
@@ -1127,7 +1226,7 @@ function ClearAllProductsPanel({ api, setNotice, load }) {
   const [password, setPassword] = useState('');
   const [confirmText, setConfirmText] = useState('');
   const [clearing, setClearing] = useState(false);
-  const [forceClean, setForceClean] = useState(true);
+  const [forceClean, setForceClean] = useState(false);
   const [includeUpstream, setIncludeUpstream] = useState(false);
 
   const doClear = async (e) => {
@@ -1179,30 +1278,191 @@ function AdminOrders({ orders, keyword, markPaid, orderAction, openOrderMessage,
   );
 }
 
-function AdminServers({ servers, keyword, orders, form, setForm, openServer, openServerEdit, serverAction }) {
+function AdminServers({ servers, keyword, orders, users, products, form, setForm, openServer, openServerEdit, serverAction, api, setNotice }) {
+  const [upstreamProducts, setUpstreamProducts] = useState([]);
+
   useEffect(() => {
-    if (!form.orderId && orders[0]) setForm((prev) => ({ ...prev, orderId: orders[0].id, name: orders[0].product?.name || '' }));
+    if (!form.orderId && orders[0]) setForm((prev) => ({ ...prev, mode: 'order', orderId: orders[0].id, name: orders[0].product?.name || '' }));
   }, [orders, form.orderId, setForm]);
-  const rows = servers.filter((server) => [server.name, server.user?.username, server.ip, server.os, server.status, server.product?.name].some((value) => textIncludes(value, keyword)));
+
+  useEffect(() => {
+    if (orders.length === 0 && form.mode === 'order') {
+      setForm((prev) => ({ ...prev, mode: 'manual', orderId: '' }));
+    }
+  }, [orders.length, form.mode, setForm]);
+
+  useEffect(() => {
+    api('/api/admin/upstream/fastmos/products')
+      .then((items) => setUpstreamProducts(items.filter((item) => item.status === 'on_sale')))
+      .catch((error) => setNotice?.(`上游产品加载失败：${error.message}`));
+  }, [api, setNotice]);
+
+  const selectedOrder = form.orderId ? orders.find((o) => o.id === form.orderId) : null;
+  const activeUsers = users.filter((u) => u.status === 'active');
+  const productOptions = [
+    ...products
+      .filter((p) => p.status === 'on_sale')
+      .map((p) => [`local:${p.id}`, `本站：${p.name}`]),
+    ...upstreamProducts.map((p) => [
+      `upstream:${p.id}`,
+      `上游：${p.title || p.upstreamId} / ${[p.areaGroup, p.area, p.netline].filter(Boolean).join(' / ') || '未分组'}`
+    ])
+  ];
+  const applySelectedProduct = (value) => {
+    update('productId', value);
+    if (value?.startsWith('upstream:')) {
+      const item = upstreamProducts.find((p) => p.id === value.slice('upstream:'.length));
+      if (item) {
+        setForm((prev) => ({
+          ...prev,
+          productId: value,
+          name: prev.name || item.title || '',
+          region: prev.region || item.areaGroup || item.area || '',
+          networkLine: prev.networkLine || item.netline || '',
+          bandwidth: prev.bandwidth || item.bandwidth || '',
+          defense: prev.defense || item.defense || ''
+        }));
+      }
+    } else if (value?.startsWith('local:')) {
+      const item = products.find((p) => p.id === value.slice('local:'.length));
+      if (item) {
+        setForm((prev) => ({
+          ...prev,
+          productId: value,
+          name: prev.name || item.name || '',
+          region: prev.region || item.location || '',
+          bandwidth: prev.bandwidth || item.bandwidth || '',
+          defense: prev.defense || item.defense || ''
+        }));
+      }
+    }
+  };
+
+  const update = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
+
+  const rows = servers.filter((server) => [server.name, server.user?.username, server.ip, server.os, server.status, server.product?.name, server.region, server.networkLine].some((value) => textIncludes(value, keyword)));
+
   return (
     <div className="admin-page">
       <h1>服务器管理</h1>
-      <Panel title="从已支付订单开通服务器">
-        <form className="admin-form product-form" onSubmit={openServer}>
-          <select className="admin-select" value={form.orderId} onChange={(event) => setForm((prev) => ({ ...prev, orderId: event.target.value }))}>{orders.map((order) => <option key={order.id} value={order.id}>{order.orderNo} / {order.user?.username}</option>)}</select>
-          <input placeholder="服务器名称" value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} required />
-          <input placeholder="IP" value={form.ip} onChange={(event) => setForm((prev) => ({ ...prev, ip: event.target.value }))} required />
-          <input placeholder="系统" value={form.os} onChange={(event) => setForm((prev) => ({ ...prev, os: event.target.value }))} />
-          <input placeholder="登录用户" value={form.loginUser} onChange={(event) => setForm((prev) => ({ ...prev, loginUser: event.target.value }))} />
-          <input placeholder="登录密码" value={form.loginPassword} onChange={(event) => setForm((prev) => ({ ...prev, loginPassword: event.target.value }))} required />
-          <input type="date" value={form.expiresAt} onChange={(event) => setForm((prev) => ({ ...prev, expiresAt: event.target.value }))} />
-          <button className="primary" type="submit"><PackagePlus size={17} />开通</button>
+
+      {/* Pending orders for quick provisioning */}
+      {orders.length > 0 && (
+        <Panel title="待开通订单">
+          <div className="pending-orders-list">
+            {orders.map((order) => (
+              <div className={`pending-order-item ${form.orderId === order.id ? 'selected' : ''}`} key={order.id} onClick={() => setForm((prev) => ({ ...prev, mode: 'order', orderId: order.id, name: order.product?.name || order.orderNo }))}>
+                <strong>{order.orderNo}</strong>
+                <span>{order.user?.username}</span>
+                <span>{order.product?.name || '-'}</span>
+                <span>{formatMoney(order.amount)}</span>
+                <StatusPill value={order.payStatus} labels={payStatusLabels} />
+              </div>
+            ))}
+          </div>
+        </Panel>
+      )}
+
+      {/* Provision form */}
+      <Panel title={form.mode === 'order' && selectedOrder ? `正在为订单 ${selectedOrder.orderNo} 开通服务器` : '开通服务器'}>
+        <form className="admin-form product-form server-provision-form" onSubmit={openServer}>
+          {/* Mode selector */}
+          <div className="form-group form-group-full">
+            <label>开通方式</label>
+            <AdminSelect value={form.mode || 'order'} onChange={(value) => update('mode', value)} options={[['order', '从订单开通'], ['manual', '手动给用户开通']]} ariaLabel="开通方式" />
+          </div>
+
+          {/* Order selection (from order mode) */}
+          {form.mode === 'order' && (
+            <div className="form-group form-group-full provision-context">
+              <label>选择待开通订单</label>
+              <AdminSelect value={form.orderId} onChange={(value) => { update('orderId', value); const o = orders.find((x) => x.id === value); if (o) update('name', o.product?.name || ''); }} options={orders.map((order) => [order.id, `${order.orderNo} / ${order.user?.username} / ${order.product?.name || '-'}`])} ariaLabel="选择待开通订单" />
+              {selectedOrder && <p className="form-hint">用户：{selectedOrder.user?.username} | 产品：{selectedOrder.product?.name || '-'} | 金额：{formatMoney(selectedOrder.amount)}</p>}
+            </div>
+          )}
+
+          {/* User & Product selection (manual mode) */}
+          {form.mode === 'manual' && (
+            <>
+              <div className="form-group">
+                <label>选择用户</label>
+                <AdminSelect value={form.userId} onChange={(value) => update('userId', value)} options={activeUsers.map((u) => [u.id, `${u.username} (${u.email})`])} ariaLabel="选择用户" />
+              </div>
+              <div className="form-group">
+                <label>选择产品</label>
+                <AdminSelect value={form.productId} onChange={applySelectedProduct} options={productOptions} ariaLabel="选择产品" />
+                {!productOptions.length && <p className="form-hint danger">暂无可选产品。请先在产品管理中应用上游产品，或新增本站产品。</p>}
+              </div>
+            </>
+          )}
+
+          {/* ── Basic Info ── */}
+          <fieldset className="form-fieldset"><legend>基础信息</legend>
+            <div className="form-row">
+              <div className="form-group"><label>服务器名称</label><input placeholder="例如：香港 BGP 云服务器" value={form.name} onChange={(e) => update('name', e.target.value)} required /></div>
+              <div className="form-group"><label>系统</label><input placeholder="例如：CentOS 7 / Ubuntu 22.04" value={form.os} onChange={(e) => update('os', e.target.value)} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>主 IP</label><input placeholder="1.2.3.4" value={form.ip} onChange={(e) => update('ip', e.target.value)} required /></div>
+              <div className="form-group"><label>IPv6</label><input placeholder="可选" value={form.ipv6} onChange={(e) => update('ipv6', e.target.value)} /></div>
+            </div>
+            <div className="form-group form-group-full"><label>附加 IP（每行一个）</label><textarea rows="2" placeholder="1.2.3.5&#10;1.2.3.6" value={form.extraIps} onChange={(e) => update('extraIps', e.target.value)} /></div>
+          </fieldset>
+
+          {/* ── Login Info ── */}
+          <fieldset className="form-fieldset"><legend>登录信息</legend>
+            <div className="form-row">
+              <div className="form-group"><label>SSH 用户</label><input placeholder="root" value={form.loginUser} onChange={(e) => update('loginUser', e.target.value)} /></div>
+              <div className="form-group"><label>SSH 密码</label><input type="text" placeholder="登录密码" value={form.loginPassword} onChange={(e) => update('loginPassword', e.target.value)} required /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>SSH 端口</label><input type="number" min="1" max="65535" placeholder="22" value={form.sshPort} onChange={(e) => update('sshPort', e.target.value)} /></div>
+            </div>
+          </fieldset>
+
+          {/* ── Network ── */}
+          <fieldset className="form-fieldset"><legend>网络资源</legend>
+            <div className="form-row">
+              <div className="form-group"><label>地区</label><input placeholder="例如：中国香港" value={form.region} onChange={(e) => update('region', e.target.value)} /></div>
+              <div className="form-group"><label>线路</label><input placeholder="例如：CN2/BGP" value={form.networkLine} onChange={(e) => update('networkLine', e.target.value)} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>带宽</label><input placeholder="例如：100M" value={form.bandwidth} onChange={(e) => update('bandwidth', e.target.value)} /></div>
+              <div className="form-group"><label>防御</label><input placeholder="例如：10G" value={form.defense} onChange={(e) => update('defense', e.target.value)} /></div>
+            </div>
+            <div className="form-group form-group-full"><label>DNS / Nameserver（每行一个）</label><textarea rows="2" placeholder="ns1.example.com&#10;ns2.example.com" value={form.nameservers} onChange={(e) => update('nameservers', e.target.value)} /></div>
+          </fieldset>
+
+          {/* ── Panel & Delivery ── */}
+          <fieldset className="form-fieldset"><legend>面板与说明</legend>
+            <div className="form-row">
+              <div className="form-group"><label>控制面板 URL</label><input placeholder="https://..." value={form.panelUrl} onChange={(e) => update('panelUrl', e.target.value)} /></div>
+              <div className="form-group"><label>面板账号</label><input placeholder="admin" value={form.panelUser} onChange={(e) => update('panelUser', e.target.value)} /></div>
+            </div>
+            <div className="form-row">
+              <div className="form-group"><label>面板密码</label><input type="text" placeholder="面板密码" value={form.panelPassword} onChange={(e) => update('panelPassword', e.target.value)} /></div>
+            </div>
+            <div className="form-group form-group-full"><label>给用户的开通说明（deliveryNote）</label><textarea rows="3" placeholder="例如：请尽快修改默认密码，控制面板地址见上..." value={form.deliveryNote} onChange={(e) => update('deliveryNote', e.target.value)} /></div>
+            <div className="form-group form-group-full"><label>后台内部备注（adminNote，不给用户看）</label><textarea rows="2" placeholder="内部备注..." value={form.adminNote} onChange={(e) => update('adminNote', e.target.value)} /></div>
+          </fieldset>
+
+          {/* ── Expiry ── */}
+          <fieldset className="form-fieldset"><legend>到期与备注</legend>
+            <div className="form-row">
+              <div className="form-group"><label>到期时间</label><input type="date" value={form.expiresAt} onChange={(e) => update('expiresAt', e.target.value)} required /></div>
+            </div>
+          </fieldset>
+
+          <button className="primary" type="submit"><PackagePlus size={17} />开通服务器</button>
         </form>
       </Panel>
-      <DataTable pagination columns={['服务器', '用户', 'IP', '系统', '到期', '状态', '操作']} rows={rows.map((server) => [
-        server.name,
+
+      {/* Server list */}
+      <DataTable pagination columns={['服务器', '用户', 'IP', '地区/线路', '系统', '到期', '状态', '操作']} rows={rows.map((server) => [
+        <div className="meta-stack"><strong>{server.name}</strong><small>{server.product?.name || '-'}</small></div>,
         server.user?.username,
-        server.ip,
+        <div className="meta-stack"><span>{server.ip}</span>{server.ipv6 ? <small>{server.ipv6}</small> : null}</div>,
+        [server.region, server.networkLine].filter(Boolean).join(' / ') || '-',
         server.os,
         formatDate(server.expiresAt),
         <StatusPill value={server.status} labels={serverStatusLabels} />,
@@ -1294,7 +1554,7 @@ function AdminUpstream({ api, setNotice, load }) {
     setSyncing(true);
     try {
       const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
-      setNotice(`同步完成：拉取 ${result.fetched} 条，新增 ${result.new}，变更 ${result.changed}，下架 ${result.offline}`);
+      setNotice(result.runId ? '获取任务已启动，请查看获取记录。' : '获取任务已提交');
       await Promise.all([fetchProducts(), fetchDiff()]);
     } catch (e) { setNotice(e.message); }
     finally { setSyncing(false); }
@@ -1386,12 +1646,14 @@ function AdminUpstream({ api, setNotice, load }) {
 
   const pollSyncProgress = async () => {
     try {
-      const data = await api('/api/admin/upstream/fastmos/sync-current');
-      if (data) {
-        setSyncProgress(data.run);
-        setSyncLogs(data.logs || []);
+      const runs = await api('/api/admin/upstream/fastmos/sync-runs');
+      const latest = runs?.[0];
+      if (latest) {
+        const logs = await api(`/api/admin/upstream/fastmos/sync-runs/${latest.id}/logs`);
+        setSyncProgress(latest);
+        setSyncLogs(logs || []);
       }
-      return data?.syncing;
+      return latest?.status === 'running';
     } catch (_) { return false; }
   };
 
@@ -1400,7 +1662,7 @@ function AdminUpstream({ api, setNotice, load }) {
     setSyncProgress(null); setSyncLogs([]);
     try {
       const result = await api('/api/admin/upstream/fastmos/fetch-preview', { method: 'POST' });
-      setNotice(`同步完成：拉取 ${result.fetched} 条，新增 ${result.new}，变更 ${result.changed}，下架 ${result.offline}`);
+      setNotice(result.runId ? '获取任务已启动，请在获取记录中查看进度。' : '获取任务已提交');
       await Promise.all([fetchProducts(), fetchDiff(), fetchSyncRuns()]);
       // Fetch logs for completed run
       try {
@@ -1471,7 +1733,7 @@ function AdminUpstream({ api, setNotice, load }) {
         <h1>上游产品管理</h1>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="primary" onClick={doSyncWithProgress} disabled={syncing}>
-            <RefreshCw size={17} />{syncing ? (syncProgress?.status === 'running' ? '同步中...' : '同步中...') : '同步上游服务器'}
+            <RefreshCw size={17} />{syncing ? '获取中...' : '获取上游数据'}
           </button>
           <button className="secondary" onClick={openCreate}><Plus size={17} />新增上游产品</button>
           <button className="secondary" onClick={() => { fetchSyncRuns(); setShowSyncHistory(true); }}>获取记录</button>
@@ -1483,11 +1745,11 @@ function AdminUpstream({ api, setNotice, load }) {
         <div className="admin-upstream-sync-progress">
           <div className="sync-progress-bar">
             <span className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />
-            <span>同步进行中... 已抓取 {syncProgress.fetchedCount || 0} 台</span>
+            <span>获取进行中... 已抓取 {syncProgress.fetchedCount || 0} 台</span>
             <span className="muted" style={{ fontSize: '0.8rem' }}>耗时 {Math.floor(((Date.now() - new Date(syncProgress.startedAt).getTime()) / 1000))}s</span>
             <button className="table-action" onClick={async () => {
               const stillRunning = await pollSyncProgress();
-              if (stillRunning) setNotice('同步仍在进行中...');
+              if (stillRunning) setNotice('获取仍在进行中...');
             }}>刷新进度</button>
           </div>
         </div>
@@ -1515,7 +1777,7 @@ function AdminUpstream({ api, setNotice, load }) {
         </div>
         {lastSync && (
           <div className="admin-upstream-status-item">
-            <span>上次同步</span><strong>{new Date(lastSync).toLocaleString('zh-HK', { hour12: false })}</strong>
+            <span>上次获取</span><strong>{new Date(lastSync).toLocaleString('zh-HK', { hour12: false })}</strong>
           </div>
         )}
       </div>
@@ -1533,17 +1795,9 @@ function AdminUpstream({ api, setNotice, load }) {
 
       {/* Filters & search */}
       <div className="admin-upstream-filters">
-        <select className="admin-select" value={filterGroup} onChange={(e) => setFilterGroup(e.target.value)}>
-          <option value="">全部产品组</option>
-          {groups.map((g) => <option key={g} value={g}>{g}</option>)}
-        </select>
+        <AdminSelect value={filterGroup} onChange={setFilterGroup} options={[['', '全部产品组'], ...groups.map((group) => [group, group])]} ariaLabel="产品组筛选" />
         {diffTab !== 'localOnly' && (
-          <select className="admin-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-            <option value="">全部状态</option>
-            <option value="on_sale">在售</option>
-            <option value="off_sale">下架</option>
-            <option value="offline">已下线</option>
-          </select>
+          <AdminSelect value={filterStatus} onChange={setFilterStatus} options={[['', '全部状态'], ['on_sale', '在售'], ['off_sale', '下架'], ['offline', '已下线']]} ariaLabel="状态筛选" />
         )}
         <div className="admin-search" style={{ flex: 1, maxWidth: 300 }}>
           <Search size={16} />
@@ -1596,7 +1850,7 @@ function AdminUpstream({ api, setNotice, load }) {
       ) : (
         <div className="admin-upstream-empty">
           <p>{currentDiff.length === 0
-            ? (diffTab === 'new' ? '暂无新增产品，可点击"同步上游服务器"刷新目录。' : '暂无数据。')
+            ? (diffTab === 'new' ? '暂无新增产品，可点击"获取上游数据"刷新目录。' : '暂无数据。')
             : '没有匹配筛选条件的产品。'}</p>
         </div>
       )}
@@ -1672,7 +1926,7 @@ function AdminUpstream({ api, setNotice, load }) {
             </fieldset>
             <fieldset><legend>状态与排序</legend>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                <label>状态<select className="admin-select" value={crudForm.status} onChange={(e) => setCrudForm((p) => ({ ...p, status: e.target.value }))}><option value="on_sale">在售</option><option value="off_sale">下架</option></select></label>
+                <label>状态<AdminSelect value={crudForm.status} onChange={(value) => setCrudForm((p) => ({ ...p, status: value }))} options={[['on_sale', '在售'], ['off_sale', '下架']]} ariaLabel="上游产品状态" /></label>
                 <label>排序<input type="number" value={crudForm.sortOrder} onChange={(e) => setCrudForm((p) => ({ ...p, sortOrder: e.target.value }))} /></label>
               </div>
             </fieldset>
@@ -1703,7 +1957,7 @@ function AdminUpstream({ api, setNotice, load }) {
 
       {/* Sync log viewer */}
       {showSyncLogs && syncProgress && (
-        <Modal title={`同步日志 (${syncProgress.id?.slice(-8)})`} onClose={() => setShowSyncLogs(false)}>
+        <Modal title={`获取日志 (${syncProgress.id?.slice(-8)})`} onClose={() => setShowSyncLogs(false)}>
           <div className="admin-upstream-log-viewer">
             <div className="sync-log-meta">
               <span>状态: {syncProgress.status}</span>
@@ -1751,7 +2005,7 @@ function AdminUpstream({ api, setNotice, load }) {
                     <td><button className="table-action" onClick={() => viewRunLogs(run.id)}>查看</button></td>
                   </tr>
                 ))}
-                {syncRuns.length === 0 && <tr><td colSpan={8} className="empty-cell">暂无同步记录</td></tr>}
+                {syncRuns.length === 0 && <tr><td colSpan={8} className="empty-cell">暂无获取记录</td></tr>}
               </tbody>
             </table>
           </div>

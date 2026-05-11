@@ -134,7 +134,7 @@ function isEnabled(val) {
   return val === 'true' || val === true;
 }
 
-export function ContactModal({ product, siteSettings, onClose }) {
+export function ContactModal({ product, siteSettings, user, onClose }) {
   const cfg = [
     { label: '产品组', value: product?.areaGroup || '-' },
     { label: '区域/线路', value: product?.netline || product?.area || '-' },
@@ -185,6 +185,14 @@ export function ContactModal({ product, siteSettings, onClose }) {
             </div>
           </div>
         )}
+
+        <div className="contact-user-hint">
+          {user ? (
+            <p>您已登录账号 <strong>{user.username}</strong>，联系客服时请告知您的账号，方便后台为您开通服务器。</p>
+          ) : (
+            <p>建议先<a href="/client?auth=register">注册</a>或<a href="/client">登录</a>后再联系客服，方便后台为您开通服务器并关联到您的账号。</p>
+          )}
+        </div>
 
         {isEnabled(siteSettings.sales_contact_qr_enabled) && siteSettings.sales_contact_qr_url && (
           <div className="contact-qr-wrap">

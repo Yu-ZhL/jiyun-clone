@@ -179,13 +179,71 @@ async function payOrderWithBalance(orderId, userId) {
   });
 }
 
-function serializeServer(server, includePassword = false) {
+function serializeServer(server, includePassword = false, isAdmin = false) {
   if (!server) return null;
-  const { loginPasswordEncrypted: _encrypted, ...rest } = server;
-  return {
+  const {
+    loginPasswordEncrypted: _lp,
+    panelPasswordEncrypted: _pp,
+    adminNote: _an,
+    ...rest
+  } = server;
+  const result = {
     ...rest,
-    loginPassword: includePassword ? decryptPassword(server.loginPasswordEncrypted) : undefined
+    loginPassword: includePassword ? decryptPassword(server.loginPasswordEncrypted) : undefined,
+    panelPassword: includePassword && server.panelPasswordEncrypted ? decryptPassword(server.panelPasswordEncrypted) : undefined
   };
+  if (isAdmin) {
+    result.adminNote = server.adminNote;
+  }
+  return result;
+}
+
+function productDataFromUpstream(usp) {
+  return {
+    name: usp.title || `${usp.areaGroup || ''} ${usp.cpu || ''}`.trim() || `上游服务器 ${usp.upstreamId}`,
+    type: '服务器租用',
+    location: usp.areaGroup || usp.area || '',
+    cpu: `${usp.cpu || '-'}${usp.cpuCount ? ` x ${usp.cpuCount}` : ''}`,
+    memory: usp.memory || '-',
+    disk: `${usp.disk || '-'}${usp.diskNum ? ` x ${usp.diskNum}` : ''} ${usp.diskSn || ''}`.trim(),
+    bandwidth: usp.bandwidth || '-',
+    defense: usp.defense || '-',
+    priceMonthly: usp.priceMonthly || 0,
+    priceYearly: usp.priceMonthly ? usp.priceMonthly * 10 : 0,
+    stock: usp.stock || 0,
+    status: 'on_sale',
+    sortOrder: usp.sortOrder || 0,
+    description: [usp.areaGroup, usp.area, usp.netline, usp.netDesc].filter(Boolean).join(' / ') || null
+  };
+}
+
+async function ensureProductForUpstream(upstreamProductId) {
+  const upstream = await prisma.upstreamServerProduct.findUnique({
+    where: { id: upstreamProductId },
+    include: { product: true }
+  });
+  if (!upstream) throw new Error('上游产品不存在');
+  if (upstream.status && upstream.status !== 'on_sale') throw new Error('上游产品不是在售状态');
+  if (upstream.productId && upstream.product) return { product: upstream.product, upstream };
+
+  const product = await prisma.product.create({ data: productDataFromUpstream(upstream) });
+  await prisma.upstreamServerProduct.update({
+    where: { id: upstream.id },
+    data: { productId: product.id, published: true }
+  });
+  return { product, upstream };
+}
+
+function parseSshPort(value) {
+  if (value === undefined || value === null || value === '') return 22;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return port;
+}
+
+function parseRequiredDate(value) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
 }
 
 function productPayload(body, partial = false) {
@@ -396,13 +454,12 @@ export function createApp() {
         server: true,
         openedServer: {
           select: {
-            id: true,
-            name: true,
-            ip: true,
-            os: true,
-            status: true,
-            expiresAt: true,
-            orderId: true,
+            id: true, name: true, ip: true, ipv6: true, extraIps: true,
+            os: true, loginUser: true, sshPort: true,
+            panelUrl: true, panelUser: true,
+            region: true, networkLine: true, bandwidth: true, defense: true,
+            nameservers: true, deliveryNote: true,
+            status: true, expiresAt: true, openedAt: true, orderId: true,
             product: true
           }
         },
@@ -776,66 +833,146 @@ export function createApp() {
 
   app.get('/api/admin/servers', requireAdmin, asyncRoute(async (_req, res) => {
     const servers = await prisma.server.findMany({ include: { user: true, product: true, order: true }, orderBy: { createdAt: 'desc' } });
-    ok(res, servers.map((server) => serializeServer(server, false)));
+    ok(res, servers.map((server) => serializeServer(server, false, true)));
   }));
 
   app.get('/api/admin/servers/:id', requireAdmin, asyncRoute(async (req, res) => {
     const server = await prisma.server.findUnique({ where: { id: req.params.id }, include: { user: true, product: true, order: true, renewals: true } });
     if (!server) return fail(res, 40402, '服务器不存在', 404);
-    ok(res, serializeServer(server, false));
+    ok(res, serializeServer(server, false, true));
   }));
 
   app.post('/api/admin/servers', requireAdmin, asyncRoute(async (req, res) => {
-    const { orderId, userId, productId, name, ip, os, loginUser, loginPassword, expiresAt, panelUrl } = req.body;
-    const order = orderId ? await prisma.order.findUnique({ where: { id: orderId } }) : null;
-    const data = {
-      userId: order?.userId || userId,
-      productId: order?.productId || productId,
-      orderId: order?.id,
-      name,
-      ip,
-      os,
-      loginUser,
-      loginPasswordEncrypted: encryptPassword(loginPassword || ''),
-      panelUrl,
-      status: 'running',
-      openedAt: new Date(),
-      expiresAt: new Date(expiresAt)
-    };
-    if (!data.userId || !data.productId || !name || !ip || !loginPassword || Number.isNaN(data.expiresAt.getTime())) {
-      return fail(res, 40041, '开通资料不完整');
+    const {
+      orderId, userId, productId, upstreamProductId,
+      name, ip, ipv6, extraIps, os, loginUser, loginPassword, sshPort,
+      panelUrl, panelUser, panelPassword,
+      region, networkLine, bandwidth, defense, nameservers,
+      deliveryNote, adminNote, expiresAt
+    } = req.body;
+
+    // Determine provisioning mode
+    let effectiveUserId, effectiveProductId, effectiveOrderId;
+
+    if (orderId) {
+      // Mode 1: provision from order
+      const order = await prisma.order.findUnique({ where: { id: orderId } });
+      if (!order) return fail(res, 40406, '订单不存在', 404);
+      if (order.type !== 'new_server') return fail(res, 40043, '只有新购订单可以开通服务器');
+      if (order.payStatus !== 'paid') return fail(res, 40044, '订单未支付，不能开通');
+      // Check duplicate: one server per order
+      const existingServer = await prisma.server.findUnique({ where: { orderId: order.id } });
+      if (existingServer) return fail(res, 40045, `该订单已开通服务器 ${existingServer.name} (${existingServer.ip})，不能重复开通`);
+      effectiveUserId = order.userId;
+      effectiveProductId = order.productId;
+      effectiveOrderId = order.id;
+    } else {
+      // Mode 2: manual provisioning
+      if (!userId) return fail(res, 40046, '手动开通请选择用户');
+      if (!productId && !upstreamProductId) return fail(res, 40047, '手动开通请选择产品');
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) return fail(res, 40404, '用户不存在', 404);
+      let product;
+      if (upstreamProductId) {
+        try {
+          ({ product } = await ensureProductForUpstream(upstreamProductId));
+        } catch (error) {
+          return fail(res, 40049, error.message);
+        }
+      } else {
+        product = await prisma.product.findUnique({ where: { id: productId } });
+      }
+      if (!product) return fail(res, 40401, '产品不存在', 404);
+      effectiveUserId = userId;
+      effectiveProductId = product.id;
+      effectiveOrderId = null;
     }
-    const server = await prisma.server.create({ data });
-    if (order) await prisma.order.update({ where: { id: order.id }, data: { provisionStatus: 'opened', openedAt: new Date() } });
-    await prisma.notification.create({
+
+    // Validate required fields
+    if (!name || !ip || !os || !loginUser || !loginPassword || !expiresAt) {
+      return fail(res, 40041, '开通资料不完整：名称、IP、系统、登录用户、登录密码、到期时间必填');
+    }
+    const sshPortNum = parseSshPort(sshPort);
+    if (sshPortNum === null) return fail(res, 40048, 'SSH 端口必须是 1-65535 之间的整数');
+    const expiresAtDate = parseRequiredDate(expiresAt);
+    if (!expiresAtDate) return fail(res, 40042, '到期时间无效');
+
+    const server = await prisma.server.create({
       data: {
-        userId: data.userId,
-        relatedOrderId: order?.id,
-        type: 'server_opened',
-        title: '服务器已开通',
-        content: `${name} 已开通，IP：${ip}`
+        userId: effectiveUserId,
+        productId: effectiveProductId,
+        orderId: effectiveOrderId,
+        name,
+        ip,
+        ipv6: ipv6 || null,
+        extraIps: extraIps || null,
+        os,
+        loginUser,
+        loginPasswordEncrypted: encryptPassword(loginPassword),
+        sshPort: sshPortNum,
+        panelUrl: panelUrl || null,
+        panelUser: panelUser || null,
+        panelPasswordEncrypted: panelPassword ? encryptPassword(panelPassword) : null,
+        region: region || null,
+        networkLine: networkLine || null,
+        bandwidth: bandwidth || null,
+        defense: defense || null,
+        nameservers: nameservers || null,
+        deliveryNote: deliveryNote || null,
+        adminNote: adminNote || null,
+        status: 'running',
+        openedAt: new Date(),
+        expiresAt: expiresAtDate
       }
     });
-    await logOperation(req, 'open_server', 'server', server.id, { orderId });
-    ok(res, serializeServer(server, false));
+
+    if (effectiveOrderId) {
+      await prisma.order.update({ where: { id: effectiveOrderId }, data: { provisionStatus: 'opened', openedAt: new Date() } });
+    }
+
+    // Build notification content
+    const deliverySnippet = deliveryNote ? `\n开通说明：${deliveryNote.slice(0, 100)}${deliveryNote.length > 100 ? '...' : ''}` : '';
+    const orderHint = effectiveOrderId ? '' : '\n请在"我的服务器"查看完整交付信息。';
+    await prisma.notification.create({
+      data: {
+        userId: effectiveUserId,
+        relatedOrderId: effectiveOrderId,
+        type: 'server_opened',
+        title: '服务器已开通',
+        content: `${name} 已开通\nIP：${ip}\n系统：${os}\n到期时间：${expiresAtDate.toISOString().slice(0, 10)}${deliverySnippet}\n请到"我的服务器"查看完整交付信息。${orderHint}`
+      }
+    });
+
+    await logOperation(req, 'open_server', 'server', server.id, { orderId: effectiveOrderId, manual: !effectiveOrderId });
+    ok(res, serializeServer(server, false, true));
   }));
 
   app.put('/api/admin/servers/:id', requireAdmin, asyncRoute(async (req, res) => {
     const data = {};
-    for (const key of ['name', 'ip', 'os', 'loginUser', 'panelUrl', 'status']) {
+    for (const key of ['name', 'ip', 'ipv6', 'extraIps', 'os', 'loginUser', 'panelUrl', 'panelUser', 'region', 'networkLine', 'bandwidth', 'defense', 'nameservers', 'deliveryNote', 'adminNote', 'status']) {
       if (req.body[key] !== undefined) data[key] = String(req.body[key]);
     }
+    if (req.body.sshPort !== undefined) {
+      const port = parseSshPort(req.body.sshPort);
+      if (port === null) return fail(res, 40048, 'SSH 端口必须是 1-65535 之间的整数');
+      data.sshPort = port;
+    }
     if (req.body.loginPassword) data.loginPasswordEncrypted = encryptPassword(req.body.loginPassword);
-    if (req.body.expiresAt) data.expiresAt = new Date(req.body.expiresAt);
+    if (req.body.panelPassword) data.panelPasswordEncrypted = encryptPassword(req.body.panelPassword);
+    if (req.body.expiresAt) {
+      const expiresAt = parseRequiredDate(req.body.expiresAt);
+      if (!expiresAt) return fail(res, 40042, '到期时间无效');
+      data.expiresAt = expiresAt;
+    }
     const server = await prisma.server.update({ where: { id: req.params.id }, data });
-    await logOperation(req, 'update_server', 'server', server.id, { ...data, loginPasswordEncrypted: data.loginPasswordEncrypted ? '[encrypted]' : undefined });
-    ok(res, serializeServer(server, false));
+    await logOperation(req, 'update_server', 'server', server.id, { ...data, loginPasswordEncrypted: data.loginPasswordEncrypted ? '[encrypted]' : undefined, panelPasswordEncrypted: data.panelPasswordEncrypted ? '[encrypted]' : undefined });
+    ok(res, serializeServer(server, false, true));
   }));
 
   app.post('/api/admin/servers/:id/open', requireAdmin, asyncRoute(async (req, res) => {
     const server = await prisma.server.update({ where: { id: req.params.id }, data: { status: 'running', openedAt: new Date(), suspendedAt: null } });
     await logOperation(req, 'open_server_status', 'server', server.id);
-    ok(res, serializeServer(server, false));
+    ok(res, serializeServer(server, false, true));
   }));
 
   app.post('/api/admin/servers/:id/suspend', requireAdmin, asyncRoute(async (req, res) => {
@@ -857,13 +994,13 @@ export function createApp() {
     if (Number.isNaN(expiresAt.getTime())) return fail(res, 40042, '到期时间无效');
     const updated = await prisma.server.update({ where: { id: server.id }, data: { expiresAt, status: 'running', suspendedAt: null } });
     await logOperation(req, 'extend_server', 'server', server.id, { expiresAt });
-    ok(res, serializeServer(updated, false));
+    ok(res, serializeServer(updated, false, true));
   }));
 
   app.post('/api/admin/servers/:id/delete', requireAdmin, asyncRoute(async (req, res) => {
     const server = await prisma.server.update({ where: { id: req.params.id }, data: { deletedAt: new Date(), status: 'deleted' } });
     await logOperation(req, 'delete_server', 'server', server.id);
-    ok(res, serializeServer(server, false));
+    ok(res, serializeServer(server, false, true));
   }));
 
   app.get('/api/admin/tickets', requireAdmin, asyncRoute(async (_req, res) => {
@@ -957,7 +1094,9 @@ export function createApp() {
 
   // ── Upstream Sync ──
 
-  const FASTMOS_BASE = 'https://www.fastmos.com/host/get_data/get_buy_info';
+const FASTMOS_BASE = 'https://www.fastmos.com/host/get_data/get_buy_info';
+const FASTMOS_REQUEST_TIMEOUT_MS = 12000;
+const UPSTREAM_RUN_STALE_MS = 2 * 60 * 1000;
 
   async function ensureFastmosSource() {
     let source = await prisma.upstreamSource.findFirst({ where: { name: 'Fastmos' } });
@@ -1069,9 +1208,22 @@ export function createApp() {
       buy_type: 'rent', netline_id: netlineId, coupon_id: '0',
       type: '', use_point: '', no_use_activity: '0'
     });
-    const response = await fetch(`${FASTMOS_BASE}?${params.toString()}`, {
-      headers: { 'Accept': 'application/json, text/javascript, */*', 'X-Requested-With': 'XMLHttpRequest' }
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), FASTMOS_REQUEST_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(`${FASTMOS_BASE}?${params.toString()}`, {
+        headers: { 'Accept': 'application/json, text/javascript, */*', 'X-Requested-With': 'XMLHttpRequest' },
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Fastmos 请求超时 ${FASTMOS_REQUEST_TIMEOUT_MS / 1000}s (area=${areaId}, parent=${parentId})`);
+      }
+      throw new Error(`Fastmos 请求失败 (area=${areaId}, parent=${parentId}): ${error.message}`);
+    } finally {
+      clearTimeout(timeout);
+    }
     if (!response.ok) throw new Error(`Fastmos 返回 HTTP ${response.status} (area=${areaId})`);
     const text = await response.text();
     let data;
@@ -1192,6 +1344,21 @@ export function createApp() {
         data: { runId, level, step, message, meta: meta ? JSON.stringify(meta) : null }
       });
     } catch (_) { /* log failure shouldn't break sync */ }
+  }
+
+  async function markStaleUpstreamRuns() {
+    const staleBefore = new Date(Date.now() - UPSTREAM_RUN_STALE_MS);
+    const result = await prisma.upstreamSyncRun.updateMany({
+      where: { status: 'running', startedAt: { lt: staleBefore } },
+      data: {
+        status: 'failed',
+        endedAt: new Date(),
+        errorMessage: `获取任务超过 ${UPSTREAM_RUN_STALE_MS / 60000} 分钟未完成，已自动标记失败`,
+        errorCount: 1
+      }
+    });
+    if (result.count > 0) _syncing = false;
+    return result.count;
   }
 
   async function syncFastmosProducts() {
@@ -1437,22 +1604,7 @@ export function createApp() {
       if (!usp) continue;
 
       if (action === 'create') {
-        const productData = {
-          name: usp.title || `${usp.areaGroup || ''} ${usp.cpu || ''}`.trim(),
-          type: '服务器租用',
-          location: usp.areaGroup || usp.area || '',
-          cpu: `${usp.cpu || '-'}${usp.cpuCount ? ` x ${usp.cpuCount}` : ''}`,
-          memory: usp.memory || '-',
-          disk: `${usp.disk || '-'}${usp.diskNum ? ` x ${usp.diskNum}` : ''} ${usp.diskSn || ''}`.trim(),
-          bandwidth: usp.bandwidth || '-',
-          defense: usp.defense || '-',
-          priceMonthly: usp.priceMonthly || 0,
-          priceYearly: usp.priceMonthly ? usp.priceMonthly * 10 : 0,
-          stock: usp.stock || 0,
-          status: 'on_sale',
-          sortOrder: usp.sortOrder || 0
-        };
-        const product = await prisma.product.create({ data: productData });
+        const product = await prisma.product.create({ data: productDataFromUpstream(usp) });
         await prisma.upstreamServerProduct.update({
           where: { id: usp.id },
           data: { productId: product.id, published: true }
@@ -1567,6 +1719,7 @@ export function createApp() {
   // ── Fetch-preview (phase A: fetch upstream, store to preview table) ──
 
   app.post('/api/admin/upstream/fastmos/fetch-preview', requireAdmin, asyncRoute(async (req, res) => {
+    await markStaleUpstreamRuns();
     if (_syncing) {
       const current = await prisma.upstreamSyncRun.findFirst({ where: { status: 'running' }, orderBy: { startedAt: 'desc' } });
       return ok(res, { runId: current?.id, status: 'running', alreadyRunning: true });
